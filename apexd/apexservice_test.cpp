@@ -18,6 +18,7 @@
 #include <android-base/logging.h>
 #include <android-base/macros.h>
 #include <android-base/properties.h>
+#include <android-base/result-gmock.h>
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
@@ -79,6 +80,7 @@ using android::base::SetProperty;
 using android::base::StartsWith;
 using android::base::StringPrintf;
 using android::base::unique_fd;
+using android::base::testing::Ok;
 using android::dm::DeviceMapper;
 using ::apex::proto::ApexManifest;
 using ::apex::proto::SessionState;
@@ -98,11 +100,6 @@ class ApexServiceTest : public ::testing::Test {
 
  protected:
   void SetUp() override {
-    // TODO(b/136647373): Move this check to environment setup
-    if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-      GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-    }
-
     // Enable VERBOSE logging to simplifying debugging
     SetProperty("log.tag.apexd", "VERBOSE");
 
@@ -303,7 +300,7 @@ class ApexServiceTest : public ::testing::Test {
         // Failure in constructor. Redo work to get error message.
         auto fail_fn = [&]() {
           Result<ApexFile> apex_file = ApexFile::Open(test_input);
-          ASSERT_FALSE(IsOk(apex_file));
+          ASSERT_THAT(apex_file, Not(Ok()));
           ASSERT_TRUE(apex_file.ok())
               << test_input << " failed to load: " << apex_file.error();
         };
@@ -391,7 +388,7 @@ class ApexServiceTest : public ::testing::Test {
     DeleteDirContent(kActiveApexPackagesDataDir);
     DeleteDirContent(kApexBackupDir);
     DeleteDirContent(kApexHashTreeDir);
-    DeleteDirContent(ApexSession::GetSessionsDir());
+    DeleteDirContent(GetSessionsDir());
 
     DeleteIfExists("/data/misc_ce/0/apexdata/apex.apexd_test");
     DeleteIfExists("/data/misc_ce/0/apexrollback/123456");
@@ -742,7 +739,7 @@ TEST_F(ApexServiceTest, SubmitStagedSessionCleanupsTempMountOnFailure) {
 
 TEST_F(ApexServiceTest, GetFactoryPackages) {
   Result<std::vector<ApexInfo>> factory_packages = GetFactoryPackages();
-  ASSERT_TRUE(IsOk(factory_packages));
+  ASSERT_RESULT_OK(factory_packages);
   ASSERT_TRUE(factory_packages->size() > 0);
 
   std::vector<std::string> builtin_dirs;
@@ -771,10 +768,10 @@ TEST_F(ApexServiceTest, GetFactoryPackages) {
 
 TEST_F(ApexServiceTest, NoPackagesAreBothActiveAndInactive) {
   Result<std::vector<ApexInfo>> active_packages = GetActivePackages();
-  ASSERT_TRUE(IsOk(active_packages));
+  ASSERT_RESULT_OK(active_packages);
   ASSERT_TRUE(active_packages->size() > 0);
   Result<std::vector<ApexInfo>> inactive_packages = GetInactivePackages();
-  ASSERT_TRUE(IsOk(inactive_packages));
+  ASSERT_RESULT_OK(inactive_packages);
   std::vector<std::string> active_packages_strings =
       GetPackagesStrings(*active_packages);
   std::vector<std::string> inactive_packages_strings =
@@ -791,12 +788,14 @@ TEST_F(ApexServiceTest, NoPackagesAreBothActiveAndInactive) {
 
 TEST_F(ApexServiceTest, GetAllPackages) {
   Result<std::vector<ApexInfo>> all_packages = GetAllPackages();
-  ASSERT_TRUE(IsOk(all_packages));
+  ASSERT_RESULT_OK(all_packages);
   ASSERT_TRUE(all_packages->size() > 0);
   Result<std::vector<ApexInfo>> active_packages = GetActivePackages();
+  ASSERT_RESULT_OK(active_packages);
   std::vector<std::string> active_strings =
       GetPackagesStrings(*active_packages);
   Result<std::vector<ApexInfo>> factory_packages = GetFactoryPackages();
+  ASSERT_RESULT_OK(factory_packages);
   std::vector<std::string> factory_strings =
       GetPackagesStrings(*factory_packages);
   for (ApexInfo& apexInfo : *all_packages) {
@@ -869,54 +868,6 @@ TEST_F(ApexServiceTest, SubmitSingleSessionTestSuccess) {
   ASSERT_TRUE(IsOk(service_->getSessions(&sessions)))
       << GetDebugStr(&installer);
   ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(expected)));
-}
-
-TEST_F(ApexServiceTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
-                                      "/data/app-staging/session_239",
-                                      "staging_data_file");
-  if (!installer.Prepare()) {
-    FAIL() << GetDebugStr(&installer);
-  }
-
-  // First simulate existence of a bunch of sessions.
-  auto session1 = ApexSession::CreateSession(37);
-  ASSERT_TRUE(IsOk(session1));
-  auto session2 = ApexSession::CreateSession(57);
-  ASSERT_TRUE(IsOk(session2));
-  auto session3 = ApexSession::CreateSession(73);
-  ASSERT_TRUE(IsOk(session3));
-  ASSERT_TRUE(IsOk(session1->UpdateStateAndCommit(SessionState::VERIFIED)));
-  ASSERT_TRUE(IsOk(session2->UpdateStateAndCommit(SessionState::STAGED)));
-  ASSERT_TRUE(IsOk(session3->UpdateStateAndCommit(SessionState::SUCCESS)));
-
-  std::vector<ApexSessionInfo> sessions;
-  ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
-
-  ApexSessionInfo expected_session1 = CreateSessionInfo(37);
-  expected_session1.isVerified = true;
-  ApexSessionInfo expected_session2 = CreateSessionInfo(57);
-  expected_session2.isStaged = true;
-  ApexSessionInfo expected_session3 = CreateSessionInfo(73);
-  expected_session3.isSuccess = true;
-  ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(expected_session1),
-                                             SessionInfoEq(expected_session2),
-                                             SessionInfoEq(expected_session3)));
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 239;
-  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
-
-  sessions.clear();
-  ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
-
-  ApexSessionInfo new_session = CreateSessionInfo(239);
-  new_session.isVerified = true;
-  ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(new_session),
-                                             SessionInfoEq(expected_session1),
-                                             SessionInfoEq(expected_session2),
-                                             SessionInfoEq(expected_session3)));
 }
 
 TEST_F(ApexServiceTest, SubmitSingleSessionTestFail) {
@@ -1048,9 +999,9 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsNoSession) {
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsSessionInWrongState) {
   auto session = ApexSession::CreateSession(73);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(
-      IsOk(session->UpdateStateAndCommit(::apex::proto::SessionState::STAGED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(
+      session->UpdateStateAndCommit(::apex::proto::SessionState::STAGED));
 
   ASSERT_FALSE(IsOk(service_->markStagedSessionSuccessful(73)));
 
@@ -1063,9 +1014,9 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsSessionInWrongState) {
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulActivatedSession) {
   auto session = ApexSession::CreateSession(239);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(
-      session->UpdateStateAndCommit(::apex::proto::SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(
+      session->UpdateStateAndCommit(::apex::proto::SessionState::ACTIVATED));
 
   ASSERT_TRUE(IsOk(service_->markStagedSessionSuccessful(239)));
 
@@ -1078,9 +1029,9 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulActivatedSession) {
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulNoOp) {
   auto session = ApexSession::CreateSession(1543);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(
-      session->UpdateStateAndCommit(::apex::proto::SessionState::SUCCESS)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(
+      session->UpdateStateAndCommit(::apex::proto::SessionState::SUCCESS));
 
   ASSERT_TRUE(IsOk(service_->markStagedSessionSuccessful(1543)));
 
@@ -1094,9 +1045,9 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulNoOp) {
 // Should be able to abort individual staged session
 TEST_F(ApexServiceTest, AbortStagedSession) {
   auto session1 = ApexSession::CreateSession(239);
-  ASSERT_TRUE(IsOk(session1->UpdateStateAndCommit(SessionState::VERIFIED)));
+  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::VERIFIED));
   auto session2 = ApexSession::CreateSession(240);
-  ASSERT_TRUE(IsOk(session2->UpdateStateAndCommit(SessionState::STAGED)));
+  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
 
   std::vector<ApexSessionInfo> sessions;
   ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
@@ -1114,9 +1065,9 @@ TEST_F(ApexServiceTest, AbortStagedSession) {
 // abortStagedSession should not abort activated session
 TEST_F(ApexServiceTest, AbortStagedSessionActivatedFail) {
   auto session1 = ApexSession::CreateSession(239);
-  ASSERT_TRUE(IsOk(session1->UpdateStateAndCommit(SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::ACTIVATED));
   auto session2 = ApexSession::CreateSession(240);
-  ASSERT_TRUE(IsOk(session2->UpdateStateAndCommit(SessionState::STAGED)));
+  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
 
   std::vector<ApexSessionInfo> sessions;
   ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
@@ -1151,7 +1102,7 @@ TEST_F(ApexServiceTest, DeleteFinalizedSessions) {
   for (auto i = 0u; i < states.size(); i++) {
     auto session = ApexSession::CreateSession(230 + i);
     SessionState::State state = states[i];
-    ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(state)));
+    ASSERT_RESULT_OK(session->UpdateStateAndCommit(state));
     if (!session->IsFinalized()) {
       nonFinalSessions++;
     }
@@ -1191,7 +1142,7 @@ TEST_F(ApexServiceTest, BackupActivePackages) {
 
   // Make sure that /data/apex/active has activated packages.
   auto active_pkgs = ReadEntireDir(kActiveApexPackagesDataDir);
-  ASSERT_TRUE(IsOk(active_pkgs));
+  ASSERT_RESULT_OK(active_pkgs);
   ASSERT_THAT(*active_pkgs,
               UnorderedElementsAre(installer1.test_installed_file,
                                    installer2.test_installed_file));
@@ -1202,7 +1153,7 @@ TEST_F(ApexServiceTest, BackupActivePackages) {
   ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
 
   auto backups = ReadEntireDir(kApexBackupDir);
-  ASSERT_TRUE(IsOk(backups));
+  ASSERT_RESULT_OK(backups);
   auto backup1 =
       StringPrintf("%s/com.android.apex.test_package@1.apex", kApexBackupDir);
   auto backup2 =
@@ -1226,7 +1177,7 @@ TEST_F(ApexServiceTest, BackupActivePackagesClearsPreviousBackup) {
   }
 
   // Make sure /data/apex/backups exists.
-  ASSERT_TRUE(IsOk(CreateDirIfNeeded(std::string(kApexBackupDir), 0700)));
+  ASSERT_RESULT_OK(CreateDirIfNeeded(std::string(kApexBackupDir), 0700));
   // Create some bogus files in /data/apex/backups.
   std::ofstream old_backup(StringPrintf("%s/file1", kApexBackupDir));
   ASSERT_TRUE(old_backup.good());
@@ -1237,7 +1188,7 @@ TEST_F(ApexServiceTest, BackupActivePackagesClearsPreviousBackup) {
 
   // Make sure that /data/apex/active has activated packages.
   auto active_pkgs = ReadEntireDir(kActiveApexPackagesDataDir);
-  ASSERT_TRUE(IsOk(active_pkgs));
+  ASSERT_RESULT_OK(active_pkgs);
   ASSERT_THAT(*active_pkgs,
               UnorderedElementsAre(installer1.test_installed_file,
                                    installer2.test_installed_file));
@@ -1248,7 +1199,7 @@ TEST_F(ApexServiceTest, BackupActivePackagesClearsPreviousBackup) {
   ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
 
   auto backups = ReadEntireDir(kApexBackupDir);
-  ASSERT_TRUE(IsOk(backups));
+  ASSERT_RESULT_OK(backups);
   auto backup1 =
       StringPrintf("%s/com.android.apex.test_package@1.apex", kApexBackupDir);
   auto backup2 =
@@ -1269,10 +1220,10 @@ TEST_F(ApexServiceTest, BackupActivePackagesZeroActivePackages) {
   }
 
   // Make sure that /data/apex/active exists and is empty
-  ASSERT_TRUE(
-      IsOk(CreateDirIfNeeded(std::string(kActiveApexPackagesDataDir), 0755)));
+  ASSERT_RESULT_OK(
+      CreateDirIfNeeded(std::string(kActiveApexPackagesDataDir), 0755));
   auto active_pkgs = ReadEntireDir(kActiveApexPackagesDataDir);
-  ASSERT_TRUE(IsOk(active_pkgs));
+  ASSERT_RESULT_OK(active_pkgs);
   ASSERT_EQ(0u, active_pkgs->size());
 
   ApexInfoList list;
@@ -1281,7 +1232,7 @@ TEST_F(ApexServiceTest, BackupActivePackagesZeroActivePackages) {
   ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
 
   auto backups = ReadEntireDir(kApexBackupDir);
-  ASSERT_TRUE(IsOk(backups));
+  ASSERT_RESULT_OK(backups);
   ASSERT_EQ(0u, backups->size());
 }
 
@@ -1304,7 +1255,7 @@ TEST_F(ApexServiceTest, ActivePackagesDirEmpty) {
 
   if (!supports_fs_checkpointing_) {
     auto backups = ReadEntireDir(kApexBackupDir);
-    ASSERT_TRUE(IsOk(backups));
+    ASSERT_RESULT_OK(backups);
     ASSERT_EQ(0u, backups->size());
   }
 }
@@ -1314,7 +1265,7 @@ class ApexServiceRevertTest : public ApexServiceTest {
   void SetUp() override { ApexServiceTest::SetUp(); }
 
   void PrepareBackup(const std::vector<std::string>& pkgs) {
-    ASSERT_TRUE(IsOk(CreateDirIfNeeded(std::string(kApexBackupDir), 0700)));
+    ASSERT_RESULT_OK(CreateDirIfNeeded(std::string(kApexBackupDir), 0700));
     for (const auto& pkg : pkgs) {
       PrepareTestApexForInstall installer(pkg);
       ASSERT_TRUE(installer.Prepare()) << " failed to prepare " << pkg;
@@ -1337,7 +1288,7 @@ class ApexServiceRevertTest : public ApexServiceTest {
 
     // Now read content and check it contains expected values.
     auto active_pkgs = ReadEntireDir(kActiveApexPackagesDataDir);
-    ASSERT_TRUE(IsOk(active_pkgs));
+    ASSERT_RESULT_OK(active_pkgs);
     ASSERT_THAT(*active_pkgs, UnorderedElementsAreArray(expected_pkgs));
   }
 };
@@ -1354,8 +1305,8 @@ TEST_F(ApexServiceRevertTest, RevertActiveSessionsSuccessful) {
   }
 
   auto session = ApexSession::CreateSession(1543);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
   // Make sure /data/apex/active is non-empty.
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
@@ -1384,8 +1335,8 @@ TEST_F(ApexServiceRevertTest,
   }
 
   auto session = ApexSession::CreateSession(1543);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
   // Make sure /data/apex/active is non-empty.
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
@@ -1434,8 +1385,8 @@ TEST_F(ApexServiceRevertTest, MarkStagedSessionSuccessfulCleanupBackup) {
                  GetTestFile("apex.apexd_test_different_app.apex")});
 
   auto session = ApexSession::CreateSession(101);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
   ASSERT_TRUE(IsOk(service_->markStagedSessionSuccessful(101)));
 
@@ -1458,9 +1409,9 @@ TEST_F(ApexServiceRevertTest, ResumesRevert) {
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
 
   auto session = ApexSession::CreateSession(17239);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(
-      IsOk(session->UpdateStateAndCommit(SessionState::REVERT_IN_PROGRESS)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(
+      session->UpdateStateAndCommit(SessionState::REVERT_IN_PROGRESS));
 
   ASSERT_TRUE(IsOk(service_->resumeRevertIfNeeded()));
 
@@ -1491,14 +1442,14 @@ TEST_F(ApexServiceRevertTest, DoesNotResumeRevert) {
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
 
   auto session = ApexSession::CreateSession(53);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::SUCCESS)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::SUCCESS));
 
   ASSERT_TRUE(IsOk(service_->resumeRevertIfNeeded()));
 
   // Check that revert wasn't resumed.
   auto active_pkgs = ReadEntireDir(kActiveApexPackagesDataDir);
-  ASSERT_TRUE(IsOk(active_pkgs));
+  ASSERT_RESULT_OK(active_pkgs);
   ASSERT_THAT(*active_pkgs,
               UnorderedElementsAre(installer.test_installed_file));
 
@@ -1516,8 +1467,8 @@ TEST_F(ApexServiceRevertTest, SessionsMarkedAsRevertFailed) {
   }
 
   auto session = ApexSession::CreateSession(53);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::ACTIVATED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
   ASSERT_FALSE(IsOk(service_->revertActiveSessions()));
   ApexSessionInfo session_info;
@@ -1533,8 +1484,8 @@ TEST_F(ApexServiceRevertTest, RevertFailedStateRevertAttemptFails) {
   }
 
   auto session = ApexSession::CreateSession(17239);
-  ASSERT_TRUE(IsOk(session));
-  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::REVERT_FAILED)));
+  ASSERT_RESULT_OK(session);
+  ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::REVERT_FAILED));
 
   ASSERT_FALSE(IsOk(service_->revertActiveSessions()));
   ApexSessionInfo session_info;
@@ -1586,10 +1537,6 @@ static void ExecInMountNamespaceOf(pid_t pid,
 // This test case is part of the ApexServiceTest suite to ensure that apexd is
 // running when this test is executed.
 TEST_F(ApexServiceTest, ApexdIsInSameMountNamespaceAsInit) {
-  // TODO(b/136647373): Move this check to environment setup
-  if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-    GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-  }
   std::string ns_apexd;
   std::string ns_init;
 
@@ -1615,10 +1562,6 @@ static const std::vector<const std::string> kEarlyProcesses = {
 // This test case is part of the ApexServiceTest suite to ensure that apexd is
 // running when this test is executed.
 TEST_F(ApexServiceTest, EarlyProcessesAreInDifferentMountNamespace) {
-  // TODO(b/136647373): Move this check to environment setup
-  if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-    GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-  }
   std::string ns_apexd;
 
   ExecInMountNamespaceOf(GetPidOf("apexd"), [&](pid_t /*pid*/) {
@@ -1638,10 +1581,6 @@ TEST_F(ApexServiceTest, EarlyProcessesAreInDifferentMountNamespace) {
 }
 
 TEST(ApexdTest, ApexIsAPrivateMountPoint) {
-  // TODO(b/136647373): Move this check to environment setup
-  if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-    GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-  }
   std::string mountinfo;
   ASSERT_TRUE(
       android::base::ReadFileToString("/proc/self/mountinfo", &mountinfo));
@@ -1666,10 +1605,6 @@ static const std::vector<const std::string> kEarlyApexes = {
 };
 
 TEST(ApexdTest, ApexesAreActivatedForEarlyProcesses) {
-  // TODO(b/136647373): Move this check to environment setup
-  if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-    GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-  }
   for (const auto& name : kEarlyProcesses) {
     pid_t pid = GetPidOf(name);
     const std::string path =
@@ -1697,10 +1632,6 @@ TEST(ApexdTest, ApexesAreActivatedForEarlyProcesses) {
 class ApexShimUpdateTest : public ApexServiceTest {
  protected:
   void SetUp() override {
-    // TODO(b/136647373): Move this check to environment setup
-    if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
-      GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-    }
     ApexServiceTest::SetUp();
 
     // Skip test if for some reason shim APEX is missing.

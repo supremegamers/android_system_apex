@@ -14,22 +14,23 @@
  * limitations under the License.
  */
 
+#include "apexd_utils.h"
+
+#include <android-base/file.h>
+#include <android-base/result-gmock.h>
+#include <android-base/result.h>
+#include <android-base/stringprintf.h>
+#include <android-base/strings.h>
+#include <errno.h>
+#include <gtest/gtest.h>
+
 #include <filesystem>
 #include <fstream>
 #include <new>
 #include <string>
 
-#include <errno.h>
-
-#include <android-base/file.h>
-#include <android-base/result.h>
-#include <android-base/stringprintf.h>
-#include <android-base/strings.h>
-#include <gtest/gtest.h>
-
 #include "apexd.h"
 #include "apexd_test_utils.h"
-#include "apexd_utils.h"
 
 namespace android {
 namespace apex {
@@ -37,10 +38,11 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using android::apex::testing::IsOk;
 using android::base::Basename;
 using android::base::Join;
 using android::base::StringPrintf;
+using android::base::testing::Ok;
+using ::testing::Not;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
@@ -55,13 +57,13 @@ TEST(ApexdUtilTest, DeleteDirContent) {
   TemporaryFile nested_file(child_dir);
 
   auto content = ReadDir(root_dir.path, [](auto _) { return true; });
-  IsOk(content);
+  ASSERT_RESULT_OK(content);
   ASSERT_EQ(content->size(), 3u);
 
   auto del_result = DeleteDirContent(root_dir.path);
-  IsOk(del_result);
+  ASSERT_RESULT_OK(del_result);
   content = ReadDir(root_dir.path, [](auto _) { return true; });
-  IsOk(content);
+  ASSERT_RESULT_OK(content);
   ASSERT_EQ(content->size(), 0u);
 }
 
@@ -69,7 +71,7 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryBothExist) {
   TemporaryDir first_dir;
   TemporaryDir second_dir;
   auto result = FindFirstExistingDirectory(first_dir.path, second_dir.path);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_EQ(*result, first_dir.path);
 }
 
@@ -77,7 +79,7 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryOnlyFirstExist) {
   TemporaryDir first_dir;
   auto second_dir = "/data/local/tmp/does/not/exist";
   auto result = FindFirstExistingDirectory(first_dir.path, second_dir);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_EQ(*result, first_dir.path);
 }
 
@@ -85,7 +87,7 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryOnlySecondExist) {
   auto first_dir = "/data/local/tmp/does/not/exist";
   TemporaryDir second_dir;
   auto result = FindFirstExistingDirectory(first_dir, second_dir.path);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_EQ(*result, second_dir.path);
 }
 
@@ -93,14 +95,14 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryNoneExist) {
   auto first_dir = "/data/local/tmp/does/not/exist";
   auto second_dir = "/data/local/tmp/also/does/not/exist";
   auto result = FindFirstExistingDirectory(first_dir, second_dir);
-  ASSERT_FALSE(IsOk(result));
+  ASSERT_THAT(result, Not(Ok()));
 }
 
 TEST(ApexdUtilTest, FindFirstExistingDirectoryFirstFileSecondDir) {
   TemporaryFile first_file;
   TemporaryDir second_dir;
   auto result = FindFirstExistingDirectory(first_file.path, second_dir.path);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_EQ(*result, second_dir.path);
 }
 
@@ -108,7 +110,7 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryFirstDirSecondFile) {
   TemporaryDir first_dir;
   TemporaryFile second_file;
   auto result = FindFirstExistingDirectory(first_dir.path, second_file.path);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_EQ(*result, first_dir.path);
 }
 
@@ -116,21 +118,21 @@ TEST(ApexdUtilTest, FindFirstExistingDirectoryBothFiles) {
   TemporaryFile first_file;
   TemporaryFile second_file;
   auto result = FindFirstExistingDirectory(first_file.path, second_file.path);
-  ASSERT_FALSE(IsOk(result));
+  ASSERT_THAT(result, Not(Ok()));
 }
 
 TEST(ApexdUtilTest, FindFirstExistingDirectoryFirstFileSecondDoesNotExist) {
   TemporaryFile first_file;
   auto second_dir = "/data/local/tmp/does/not/exist";
   auto result = FindFirstExistingDirectory(first_file.path, second_dir);
-  ASSERT_FALSE(IsOk(result));
+  ASSERT_THAT(result, Not(Ok()));
 }
 
 TEST(ApexdUtilTest, FindFirstExistingDirectoryFirsDoesNotExistSecondFile) {
   auto first_dir = "/data/local/tmp/does/not/exist";
   TemporaryFile second_file;
   auto result = FindFirstExistingDirectory(first_dir, second_file.path);
-  ASSERT_FALSE(IsOk(result));
+  ASSERT_THAT(result, Not(Ok()));
 }
 
 TEST(ApexdUtilTest, MoveDir) {
@@ -145,7 +147,7 @@ TEST(ApexdUtilTest, MoveDir) {
   TemporaryFile from_2(from_subdir);
 
   auto result = MoveDir(from.path, to.path);
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_TRUE(fs::is_empty(from.path));
 
   std::vector<std::string> content;
@@ -164,19 +166,19 @@ TEST(ApexdUtilTest, MoveDir) {
 TEST(ApexdUtilTest, MoveDirFromIsNotDirectory) {
   TemporaryFile from;
   TemporaryDir to;
-  ASSERT_FALSE(IsOk(MoveDir(from.path, to.path)));
+  ASSERT_THAT(MoveDir(from.path, to.path), Not(Ok()));
 }
 
 TEST(ApexdUtilTest, MoveDirToIsNotDirectory) {
   TemporaryDir from;
   TemporaryFile to;
   TemporaryFile from_1(from.path);
-  ASSERT_FALSE(IsOk(MoveDir(from.path, to.path)));
+  ASSERT_THAT(MoveDir(from.path, to.path), Not(Ok()));
 }
 
 TEST(ApexdUtilTest, MoveDirFromDoesNotExist) {
   TemporaryDir to;
-  ASSERT_FALSE(IsOk(MoveDir("/data/local/tmp/does/not/exist", to.path)));
+  ASSERT_THAT(MoveDir("/data/local/tmp/does/not/exist", to.path), Not(Ok()));
 }
 
 TEST(ApexdUtilTest, MoveDirToDoesNotExist) {
@@ -190,7 +192,7 @@ TEST(ApexdUtilTest, MoveDirToDoesNotExist) {
   }
   TemporaryFile from_2(from_subdir);
 
-  ASSERT_FALSE(IsOk(MoveDir(from.path, "/data/local/tmp/does/not/exist")));
+  ASSERT_THAT(MoveDir(from.path, "/data/local/tmp/does/not/exist"), Not(Ok()));
 
   // Check that |from| directory is not empty.
   std::vector<std::string> content;
@@ -217,7 +219,7 @@ TEST(ApexdUtilTest, FindFilesBySuffix) {
   std::ofstream fourth_file(fourth_filename);
 
   auto result = FindFilesBySuffix(td.path, {".b", ".c"});
-  ASSERT_TRUE(IsOk(result));
+  ASSERT_RESULT_OK(result);
   ASSERT_THAT(*result, UnorderedElementsAre(second_filename, third_filename,
                                             fourth_filename));
 }
@@ -244,10 +246,10 @@ TEST(ApexdTestUtilsTest, SetUpApexTestEnvironment) {
   auto original_apex_mounts = GetApexMounts();
   ASSERT_GT(original_apex_mounts.size(), 0u);
   auto original_dir_content = ReadDir("/apex", [](auto _) { return true; });
-  ASSERT_TRUE(IsOk(original_dir_content));
+  ASSERT_RESULT_OK(original_dir_content);
   {
     MountNamespaceRestorer restorer;
-    ASSERT_TRUE(IsOk(SetUpApexTestEnvironment()));
+    ASSERT_RESULT_OK(SetUpApexTestEnvironment());
     // Check /apex is apex_mnt_dir.
     char* context;
     ASSERT_GT(getfilecon("/apex", &context), 0);
@@ -258,7 +260,7 @@ TEST(ApexdTestUtilsTest, SetUpApexTestEnvironment) {
     ASSERT_EQ(new_apex_mounts.size(), 0u);
     // Check that /apex is empty.
     auto dir_content = ReadDir("/apex", [](auto _) { return true; });
-    ASSERT_TRUE(IsOk(dir_content));
+    ASSERT_RESULT_OK(dir_content);
     ASSERT_EQ(dir_content->size(), 0u)
         << "Found following entries: " << Join(*dir_content, ',');
     // Check that we can still access /data.
@@ -275,7 +277,7 @@ TEST(ApexdTestUtilsTest, SetUpApexTestEnvironment) {
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts, UnorderedElementsAreArray(original_apex_mounts));
   auto apex_dir_content = ReadDir("/apex", [](auto _) { return true; });
-  ASSERT_TRUE(IsOk(apex_dir_content));
+  ASSERT_RESULT_OK(apex_dir_content);
   ASSERT_EQ(apex_dir_content->size(), original_dir_content->size());
 }
 

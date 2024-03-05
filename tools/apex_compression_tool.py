@@ -140,6 +140,8 @@ def AddOriginalApexDigestToManifest(capex_manifest_path, apex_image_path, verbos
   with open(capex_manifest_path, 'rb') as f:
     pb = apex_manifest_pb2.ApexManifest()
     pb.ParseFromString(f.read())
+
+  assert not pb.supportsRebootlessUpdate, "Rebootless updates not supported for compressed APEXs"
   # Populate CompressedApexMetadata
   capex_metadata = apex_manifest_pb2.ApexManifest().CompressedApexMetadata()
   capex_metadata.originalApexDigest = root_digest

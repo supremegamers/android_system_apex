@@ -67,7 +67,7 @@ apex {
 cc_binary {
     name: "apex_vendor_foo_test_binary",
     shared_libs: [
-        "libbinder_ndk",  // will add "requireNativeLibs"
+        "libbinder_ndk", // will add "requireNativeLibs"
     ],
     srcs: [
         "apex_vendor_foo_test_binary.cpp",
@@ -175,4 +175,126 @@ apex {
         "apex_vendor_foo_v2.rc",
         "apex_vendor_foo_v2_vintf",
     ],
+}
+
+// Test apex for updating com.android.hardware.wifi, with an
+//    updatable-via-apex value that doesn't match wifi's interface.
+apex {
+    name: "test.bad1.com.android.hardware.wifi",
+    manifest: "wifi_manifest_rebootless.json",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
+    file_contexts: "wifi_file_contexts",
+    use_vndk_as_stable: true,
+    updatable: false,
+    soc_specific: true,
+    installable: false,
+    prebuilts: [
+        "vintf_fragment_wifi_bad1.xml",
+        "com.android.hardware.wifi.rc",
+    ],
+}
+
+prebuilt_etc {
+    name: "vintf_fragment_wifi_bad1.xml",
+    src: "vintf_fragment_wifi_bad1.xml",
+    installable: false,
+    sub_dir: "vintf", // Puts fragment into etc/vintf
+}
+
+// Creates wifi test apex where its vintf fragment has invalid XML syntax
+//    (an unclosed tag)
+apex_test {
+    name: "test.bad2.com.android.hardware.wifi",
+    manifest: "wifi_manifest_rebootless.json",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
+    file_contexts: "wifi_file_contexts",
+    use_vndk_as_stable: true,
+    updatable: false,
+    soc_specific: true,
+    installable: false,
+    prebuilts: [
+        "vintf_fragment_wifi_bad2.xml",
+        "com.android.hardware.wifi.rc",
+    ],
+}
+
+prebuilt_etc {
+    name: "vintf_fragment_wifi_bad2.xml",
+    src: "vintf_fragment_wifi_bad2.xml",
+    installable: false,
+    sub_dir: "vintf",
+}
+
+// Creates wifi test apex that is updating interface for other hardware
+//    (picked an HAL that exists elsewhere, and for hardware that has
+//     updatable-via-apex="true", and still gets caught - good!)
+apex_test {
+    name: "test.bad3.com.android.hardware.wifi",
+    manifest: "wifi_manifest_rebootless.json",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
+    file_contexts: "wifi_file_contexts",
+    use_vndk_as_stable: true,
+    updatable: false,
+    soc_specific: true,
+    installable: false,
+    prebuilts: [
+        "vintf_fragment_wifi_bad3.xml",
+        "com.android.hardware.wifi.rc",
+    ],
+}
+
+prebuilt_etc {
+    name: "vintf_fragment_wifi_bad3.xml",
+    src: "vintf_fragment_wifi_bad3.xml",
+    installable: false,
+    sub_dir: "vintf",
+}
+
+// Test apex for updating com.android.hardware.wifi, with a
+//    good apex
+apex {
+    name: "test.good1.com.android.hardware.wifi",
+    manifest: "wifi_manifest_rebootless.json",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
+    file_contexts: "wifi_file_contexts",
+    use_vndk_as_stable: true,
+    updatable: false,
+    soc_specific: true,
+    installable: false,
+    prebuilts: [
+        "vintf_fragment_wifi_good1.xml",
+        "com.android.hardware.wifi.rc",
+    ],
+}
+
+prebuilt_etc {
+    name: "vintf_fragment_wifi_good1.xml",
+    src: "vintf_fragment_wifi_service.xml",
+    installable: false,
+    sub_dir: "vintf", // Puts fragment into etc/vintf
+}
+
+prebuilt_etc {
+    name: "apex_vendor_foo_bootstrap.rc",
+    src: "apex_vendor_foo_bootstrap.rc",
+    vendor: true,
+    installable: false,
+}
+
+apex {
+    name: "com.android.apex.vendor.foo.bootstrap",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_bootstrap.rc",
+    ],
+    manifest: "manifest_bootstrap.json",
 }

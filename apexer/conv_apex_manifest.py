@@ -88,7 +88,7 @@ def main():
 
   parser_proto = subparsers.add_parser('proto', help='write protobuf binary format')
   parser_proto.add_argument('input', type=str, help='APEX manifest file (JSON)')
-  parser_proto.add_argument('-o', '--out', required=True, type=str, help='Directory to extract content of APEX to')
+  parser_proto.add_argument('-o', '--out', required=True, type=str, help='APEX manifest file (PB)')
   parser_proto.set_defaults(func=Proto)
 
   parser_setprop = subparsers.add_parser('setprop', help='change property value')

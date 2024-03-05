@@ -85,9 +85,6 @@ static constexpr const char* kApexAllReadyProp = "apex.all.ready";
 static constexpr const char* kCtlApexLoadSysprop = "ctl.apex_load";
 static constexpr const char* kCtlApexUnloadSysprop = "ctl.apex_unload";
 
-static constexpr const char* kMetadataSepolicyStagedDir =
-    "/metadata/sepolicy/staged";
-
 // Banned APEX names
 static const std::unordered_set<std::string> kBannedApexName = {
     kApexSharedLibsSubDir,  // To avoid conflicts with predefined

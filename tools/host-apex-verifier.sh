@@ -1,12 +1,6 @@
 #!/bin/bash
 set -x
 
-APEX_UPDATABLE="`adb shell getprop ro.apex.updatable`"
-if [[ $APEX_UPDATABLE != "true" ]]; then
-  echo "Skipping this test: device uses flattened APEXes."
-  exit 0;
-fi
-
 echo "Pulling APEXes from the device factory APEX directories."
 TEMP_DIR="`mktemp -d`"
 adb pull /system/apex/ $TEMP_DIR/system

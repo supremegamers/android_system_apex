@@ -86,4 +86,7 @@ message ApexManifest {
 
   // VNDK version for apexes depending on a specific version of VNDK libs.
   string vndkVersion = 14;
+
+  // Whether this vendor APEX needs to be activated in bootstrap phase.
+  bool vendorBootstrap = 15;
 }

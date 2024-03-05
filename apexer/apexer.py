@@ -19,16 +19,6 @@ Typical usage: apexer input_dir output.apex
 
 """
 
-import sys
-
-if len(sys.path) >= 2 and "/execroot/__main__/" in sys.path[1] and "/execroot/__main__/" not in sys.path[0]:
-  # TODO(b/235287972): Remove this hack. Bazel currently has a bug where a path outside
-  # of the execroot is added to the beginning of sys.path, because the python interpreter
-  # will add the directory of the main file to the path, following symlinks as it does.
-  # This can be fixed with the -P option or the PYTHONSAFEPATH environment variable in
-  # python 3.11.0, which is not yet released.
-  del sys.path[0]
-
 import apex_build_info_pb2
 import argparse
 import hashlib
@@ -38,6 +28,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 import xml.etree.ElementTree as ET
@@ -111,8 +102,8 @@ def ParseArgs(argv):
       metavar='TYPE',
       required=False,
       default='image',
-      choices=['zip', 'image'],
-      help='type of APEX payload being built "zip" or "image"')
+      choices=['image'],
+      help='type of APEX payload being built..')
   parser.add_argument(
       '--payload_fs_type',
       metavar='FS_TYPE',
@@ -341,29 +332,28 @@ def ValidateArgs(args):
     args.payload_only = True;
     args.unsigned_payload = True;
 
-  if args.payload_type == 'image':
-    if not args.key and not args.unsigned_payload:
-      print('Missing --key {keyfile} argument!')
+  if not args.key and not args.unsigned_payload:
+    print('Missing --key {keyfile} argument!')
+    return False
+
+  if not args.file_contexts:
+    if build_info is not None:
+      with tempfile.NamedTemporaryFile(delete=False) as temp:
+        temp.write(build_info.file_contexts)
+        args.file_contexts = temp.name
+    else:
+      print('Missing --file_contexts {contexts} argument, or a --build_info argument!')
       return False
 
-    if not args.file_contexts:
+  if not args.canned_fs_config:
+    if not args.canned_fs_config:
       if build_info is not None:
         with tempfile.NamedTemporaryFile(delete=False) as temp:
-          temp.write(build_info.file_contexts)
-          args.file_contexts = temp.name
+          temp.write(build_info.canned_fs_config)
+          args.canned_fs_config = temp.name
       else:
-        print('Missing --file_contexts {contexts} argument, or a --build_info argument!')
+        print('Missing ----canned_fs_config {config} argument, or a --build_info argument!')
         return False
-
-    if not args.canned_fs_config:
-      if not args.canned_fs_config:
-        if build_info is not None:
-          with tempfile.NamedTemporaryFile(delete=False) as temp:
-            temp.write(build_info.canned_fs_config)
-            args.canned_fs_config = temp.name
-        else:
-          print('Missing ----canned_fs_config {config} argument, or a --build_info argument!')
-          return False
 
   if not args.target_sdk_version:
     if build_info is not None:
@@ -718,20 +708,10 @@ def CreateApexPayload(args, work_dir, content_dir, manifests_dir,
   Returns:
     payload file
   """
-  if args.payload_type == 'image':
-    img_file = os.path.join(content_dir, 'apex_payload.img')
-    CreateImage(args, work_dir, manifests_dir, img_file)
-    if not args.unsigned_payload:
-      SignImage(args, manifest_apex, img_file)
-  else:
-    img_file = os.path.join(content_dir, 'apex_payload.zip')
-    cmd = ['soong_zip']
-    cmd.extend(['-o', img_file])
-    cmd.extend(['-C', args.input_dir])
-    cmd.extend(['-D', args.input_dir])
-    cmd.extend(['-C', manifests_dir])
-    cmd.extend(['-D', manifests_dir])
-    RunCommand(cmd, args.verbose)
+  img_file = os.path.join(content_dir, 'apex_payload.img')
+  CreateImage(args, work_dir, manifests_dir, img_file)
+  if not args.unsigned_payload:
+    SignImage(args, manifest_apex, img_file)
   return img_file
 
 

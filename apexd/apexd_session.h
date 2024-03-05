@@ -28,13 +28,22 @@
 namespace android {
 namespace apex {
 
+// Starting from R, apexd prefers /metadata partition (kNewApexSessionsDir) as
+// location for sessions-related information. For devices that don't have
+// /metadata partition, apexd will fallback to the /data one
+// (kOldApexSessionsDir).
+static constexpr const char* kOldApexSessionsDir = "/data/apex/sessions";
+static constexpr const char* kNewApexSessionsDir = "/metadata/apex/sessions";
+
+// Returns top-level directory to store sessions metadata in.
+// If device has /metadata partition, this will return
+// /metadata/apex/sessions, on all other devices it will return
+// /data/apex/sessions.
+std::string GetSessionsDir();
+
+// TODO(b/288309411): remove static functions in this class.
 class ApexSession {
  public:
-  // Returns top-level directory to store sessions metadata in.
-  // If device has /metadata partition, this will return
-  // /metadata/apex/sessions, on all other devices it will return
-  // /data/apex/sessions.
-  static std::string GetSessionsDir();
   // Migrates content of /data/apex/sessions to /metadata/apex/sessions.
   // If device doesn't have /metadata partition this call will be a no-op.
   // If /data/apex/sessions this call will also be a no-op.
@@ -45,8 +54,6 @@ class ApexSession {
   static std::vector<ApexSession> GetSessions();
   static std::vector<ApexSession> GetSessionsInState(
       ::apex::proto::SessionState::State state);
-  static android::base::Result<std::optional<ApexSession>> GetActiveSession();
-  static std::vector<ApexSession> GetActiveSessions();
   ApexSession() = delete;
 
   const google::protobuf::RepeatedField<int> GetChildSessionIds() const;
@@ -60,6 +67,7 @@ class ApexSession {
   bool IsRollback() const;
   int GetRollbackId() const;
   const google::protobuf::RepeatedPtrField<std::string> GetApexNames() const;
+  const std::string& GetSessionDir() const;
 
   void SetChildSessionIds(const std::vector<int>& child_session_ids);
   void SetBuildFingerprint(const std::string& fingerprint);
@@ -76,12 +84,40 @@ class ApexSession {
   android::base::Result<void> DeleteSession() const;
   static void DeleteFinalizedSessions();
 
- private:
-  explicit ApexSession(::apex::proto::SessionState state);
-  ::apex::proto::SessionState state_;
+  friend class ApexSessionManager;
 
-  static android::base::Result<ApexSession> GetSessionFromFile(
-      const std::string& path);
+ private:
+  ApexSession(::apex::proto::SessionState state, std::string session_dir);
+  ::apex::proto::SessionState state_;
+  std::string session_dir_;
+
+  static android::base::Result<ApexSession> GetSessionFromDir(
+      const std::string& session_dir);
+};
+
+class ApexSessionManager {
+ public:
+  ApexSessionManager(ApexSessionManager&&) noexcept;
+  ApexSessionManager& operator=(ApexSessionManager&&) noexcept;
+
+  static std::unique_ptr<ApexSessionManager> Create(
+      std::string sessions_base_dir);
+
+  android::base::Result<ApexSession> CreateSession(int session_id);
+  android::base::Result<ApexSession> GetSession(int session_id) const;
+  std::vector<ApexSession> GetSessions() const;
+  std::vector<ApexSession> GetSessionsInState(
+      const ::apex::proto::SessionState::State& state) const;
+
+  android::base::Result<void> MigrateFromOldSessionsDir(
+      const std::string& old_sessions_base_dir);
+
+ private:
+  explicit ApexSessionManager(std::string sessions_base_dir);
+  ApexSessionManager(const ApexSessionManager&) = delete;
+  ApexSessionManager& operator=(const ApexSessionManager&) = delete;
+
+  std::string sessions_base_dir_;
 };
 
 std::ostream& operator<<(std::ostream& out, const ApexSession& session);

@@ -75,6 +75,11 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
         }
     }
 
+    private boolean deviceHasActiveApex(String apexName) throws Exception {
+        return getDevice().getActiveApexes().stream().anyMatch(
+                apex -> apex.name.equals(apexName));
+    }
+
     @Test
     public void testOrphanedApexIsNotActivated() throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
@@ -338,5 +343,175 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
         } finally {
             getDevice().deleteFile("/data/apex/active/com.android.apex.cts.shim@2.apex");
         }
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex update with an
+     *     updatable-via-apex value that doesn't match the apex's interface.
+     *     Install method is reboot-needing (staged) installation.
+     */
+    @Test
+    public void testRejectsStagedApexWithIncorrectUpdatableViaApexValue() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad1.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get an error
+        String error = mHostUtils.installStagedPackage(apexFile);
+        assertThat(error).isNotNull();
+        // Verify error text involves the device manifest (Note the actual
+        //   parser error is visible in the log, but it doesn't get passed
+        //   up through libvintf, so we end up with a manifest-related error)
+        assertThat(error).contains("No device manifest");
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex update with a
+     *     vintf fragment containing syntax-invalid XML. Staged installation.
+     */
+    @Test
+    public void testRejectsStagedApexWithInvalidSyntaxVintfFragment() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad2.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get our device manifest error
+        String error = mHostUtils.installStagedPackage(apexFile);
+        assertThat(error).isNotNull();
+        assertThat(error).contains("No device manifest");
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex that tries to
+     *     update an unrelated hardware interface.  Staged installation.
+     */
+    @Test
+    public void testRejectsStagedApexThatUpdatesUnrelatedHardware() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad3.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get a manifest/matix compatibility error
+        String error = mHostUtils.installStagedPackage(apexFile);
+        assertThat(error).isNotNull();
+        assertThat(error).contains(
+                "Device manifest and framework compatibility matrix are incompatible");
+    }
+
+    /**
+     * Test to verify that apexd will accept a good vendor apex update
+     *     Install method is immediate (rebootless) (non-staged) installation.
+     */
+    @Test
+    public void testAcceptsGoodRebootlessApex() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.good1.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get an error
+        String error = mHostUtils.installRebootlessPackage(apexFile);
+        assertThat(error).isNull();
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex update with an
+     *     updatable-via-apex value that doesn't match the apex's interface.
+     *     Install method is immediate (rebootless) (non-staged) installation.
+     */
+    @Test
+    public void testRejectsRebootlessApexWithIncorrectUpdatableViaApexValue() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad1.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get an error
+        String error = mHostUtils.installRebootlessPackage(apexFile);
+        assertThat(error).isNotNull();
+        // Verify error text involves the device manifest (Note the actual
+        //   parser error is visible in the log, but it doesn't get passed
+        //   up through libvintf, so we end up with a manifest-related error)
+        assertThat(error).contains("No device manifest");
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex update with a
+     *     vintf fragment containing syntax-invalid XML.
+     */
+    @Test
+    public void testRejectsRebootlessApexWithInvalidSyntaxVintfFragment() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad2.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get our device manifest error
+        String error = mHostUtils.installRebootlessPackage(apexFile);
+        assertThat(error).isNotNull();
+        assertThat(error).contains("No device manifest");
+    }
+
+    /**
+     * Test to verify that apexd will reject a vendor apex tries to
+     *     update an unrelated hardware interface.
+     */
+    @Test
+    public void testRejectsRebootlessApexThatUpdatesUnrelatedHardware() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeTrue("Device test requires wifi hardware",
+                getDevice().hasFeature("android.hardware.wifi"));
+        assumeTrue("Device test requires an active wifi apex",
+                deviceHasActiveApex("com.android.hardware.wifi"));
+
+        String apex_filename = "test.bad3.com.android.hardware.wifi.apex";
+
+        File apexFile = mHostUtils.getTestFile(apex_filename);
+
+        // Try to install it, we should get a manifest/matix compatibility error
+        String error = mHostUtils.installRebootlessPackage(apexFile);
+        assertThat(error).isNotNull();
+        assertThat(error).contains(
+                "Device manifest and framework compatibility matrix are incompatible");
     }
 }

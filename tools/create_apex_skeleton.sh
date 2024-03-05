@@ -5,17 +5,37 @@
 # Exit early if any subcommands fail.
 set -e
 
+usage() {
+  echo "Usage $0 [options] apex_package_name"
+  echo "  -v"
+  echo "       Whether this is a vendor APEX"
+  echo "  -k existing_apex_keyname"
+  echo "       Use existing key instead of creating a new key"
+  exit -1
+}
+
+is_vendor=0
+
+while getopts "vk:" opt; do
+  case $opt in
+    v)
+      is_vendor=1
+      ;;
+    k)
+      APEX_KEY=${OPTARG}
+      ;;
+    *)
+      usage
+  esac
+done
+
+shift $((OPTIND-1))
 APEX_NAME=$1
 if [ -z ${APEX_NAME} ]
 then
-   echo "Missing apex package name"
-   echo "Usage $0 apex_package_name [existing_apex_key_name]"
-   exit -1
+  echo "Missing apex package name"
+  usage
 fi
-
-# Optional. If provided, uses existing key files and module name.
-# Otherwise, generates new key files using the APEX_NAME.
-APEX_KEY=$2
 
 YEAR=$(date +%Y)
 mkdir -p ${APEX_NAME}
@@ -86,6 +106,8 @@ EOF
 
 fi
 
+if ((is_vendor == 0)); then
+
 cat >> Android.bp <<EOF
 apex {
     name: "${APEX_NAME}",
@@ -99,10 +121,40 @@ EOF
 
 cat > manifest.json << EOF
 {
-  "name": "${APEX_NAME}",
+    "name": "${APEX_NAME}",
 
-  // Placeholder module version to be replaced during build.
-  // Do not change!
-  "version": 0
+    // Placeholder module version to be replaced during build.
+    // Do not change!
+    "version": 0
 }
 EOF
+
+else
+
+cat >> Android.bp <<EOF
+apex {
+    name: "${APEX_NAME}",
+    manifest: "manifest.json",
+    file_contexts: "file_contexts",
+    key: "${APEX_KEY}.key",
+    certificate: ":${APEX_KEY}.certificate",
+    updatable: false,
+    vendor: true,
+}
+EOF
+
+cat > manifest.json << EOF
+{
+    "name": "${APEX_NAME}",
+    "version": 1
+}
+EOF
+
+cat > file_contexts << EOF
+(/.*)?                                                          u:object_r:vendor_file:s0
+/etc(/.*)?                                                      u:object_r:vendor_configs_file:s0
+# Add more ...
+# /bin/hw/foo                                                   u:object_r:hal_foo_exec:s0
+EOF
+
+fi

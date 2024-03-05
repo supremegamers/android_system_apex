@@ -57,10 +57,6 @@ static constexpr const char LIB[] = "lib64";
 static constexpr const char kApexSharedLibsRoot[] = "/apex/sharedlibs";
 
 TEST(apex_shared_libraries, symlink_libraries_loadable) {
-  if (!GetBoolProperty("ro.apex.updatable", false)) {
-    GTEST_SKIP() << "Skipping test because device doesn't support APEX";
-  }
-
   Fstab fstab;
   ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &fstab));
 

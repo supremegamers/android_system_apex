@@ -24,8 +24,7 @@ namespace android {
 namespace apex {
 
 // Returns active APEX packages as a map of path(e.g. /apex/com.android.foo) to
-// ApexManifest. This is very similar to ApexService::getActivePackages, but it
-// doesn't rely on whether APEXes are flattened or not.
+// ApexManifest. This is very similar to ApexService::getActivePackages.
 // For testing purpose, it accepts the apex root path which is defined by
 // kApexRoot constant.
 std::map<std::string, ::apex::proto::ApexManifest>

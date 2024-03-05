@@ -136,8 +136,6 @@ interface IApexService {
 
    /**
     * Performs a non-staged install of the given APEX.
-    * Note: don't confuse this to preInstall and postInstall binder calls which are only used to
-    * test corresponding features of APEX packages.
     */
-   ApexInfo installAndActivatePackage(in @utf8InCpp String packagePath);
+   ApexInfo installAndActivatePackage(in @utf8InCpp String packagePath, boolean force);
 }

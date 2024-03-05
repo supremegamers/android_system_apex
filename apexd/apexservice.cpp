@@ -58,7 +58,7 @@ BinderStatus CheckCallerIsRoot(const std::string& name) {
   if (uid != AID_ROOT) {
     std::string msg = "Only root is allowed to call " + name;
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
-                                           String8(name.c_str()));
+                                           String8(msg.c_str()));
   }
   return BinderStatus::ok();
 }
@@ -68,7 +68,7 @@ BinderStatus CheckCallerSystemOrRoot(const std::string& name) {
   if (uid != AID_ROOT && uid != AID_SYSTEM) {
     std::string msg = "Only root and system_server are allowed to call " + name;
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
-                                           String8(name.c_str()));
+                                           String8(msg.c_str()));
   }
   return BinderStatus::ok();
 }
@@ -118,6 +118,7 @@ class ApexService : public BnApexService {
   BinderStatus reserveSpaceForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list) override;
   BinderStatus installAndActivatePackage(const std::string& package_path,
+                                         bool force,
                                          ApexInfo* aidl_return) override;
 
   status_t dump(int fd, const Vector<String16>& args) override;
@@ -131,7 +132,7 @@ class ApexService : public BnApexService {
 
 BinderStatus CheckDebuggable(const std::string& name) {
   if (!::android::base::GetBoolProperty("ro.debuggable", false)) {
-    std::string tmp = name + " unavailable";
+    std::string tmp = name + " unavailable on non-debuggable builds";
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
                                            String8(tmp.c_str()));
   }
@@ -541,16 +542,23 @@ BinderStatus ApexService::getAllPackages(std::vector<ApexInfo>* aidl_return) {
 }
 
 BinderStatus ApexService::installAndActivatePackage(
-    const std::string& package_path, ApexInfo* aidl_return) {
+    const std::string& package_path, bool force, ApexInfo* aidl_return) {
   LOG(INFO) << "installAndActivatePackage() received by ApexService, path: "
-            << package_path;
+            << package_path << " force : " << force;
 
   auto check = CheckCallerSystemOrRoot("installAndActivatePackage");
   if (!check.isOk()) {
     return check;
   }
 
-  auto res = InstallPackage(package_path);
+  if (force) {
+    auto debug_check = CheckDebuggable("Forced non-staged APEX update");
+    if (!debug_check.isOk()) {
+      return debug_check;
+    }
+  }
+
+  auto res = InstallPackage(package_path, force);
   if (!res.ok()) {
     LOG(ERROR) << "Failed to install package " << package_path << " : "
                << res.error();
@@ -814,7 +822,7 @@ status_t ApexService::dump(int fd, const Vector<String16>& /*args*/) {
   dprintf(fd, "ACTIVE PACKAGES:\n");
   if (!status.isOk()) {
     std::string msg = StringLog() << "Failed to retrieve packages: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(fd, "%s", msg.c_str());
     return BAD_VALUE;
   } else {
@@ -918,14 +926,14 @@ status_t ApexService::shellCommand(int in, int out, int err,
     std::vector<std::string> pkgs;
     pkgs.reserve(args.size() - 1);
     for (size_t i = 1; i != args.size(); ++i) {
-      pkgs.emplace_back(String8(args[i]).string());
+      pkgs.emplace_back(String8(args[i]).c_str());
     }
     BinderStatus status = stagePackages(pkgs);
     if (status.isOk()) {
       return OK;
     }
     std::string msg = StringLog() << "Failed to stage package(s): "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -944,7 +952,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to retrieve packages: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -964,7 +972,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to retrieve packages: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -976,17 +984,17 @@ status_t ApexService::shellCommand(int in, int out, int err,
     }
 
     ApexInfo package;
-    BinderStatus status = getActivePackage(String8(args[1]).string(), &package);
+    BinderStatus status = getActivePackage(String8(args[1]).c_str(), &package);
     if (status.isOk()) {
       std::string msg = ToString(package);
       dprintf(out, "%s", msg.c_str());
       return OK;
     }
 
-    std::string msg = StringLog() << "Failed to fetch active package: "
-                                  << String8(args[1]).string()
-                                  << ", error: " << status.toString8().string()
-                                  << std::endl;
+    std::string msg = StringLog()
+                      << "Failed to fetch active package: "
+                      << String8(args[1]).c_str()
+                      << ", error: " << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -996,7 +1004,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       print_help(err, "activatePackage requires one package_path");
       return BAD_VALUE;
     }
-    std::string path = String8(args[1]).string();
+    std::string path = String8(args[1]).c_str();
     auto status = ::android::apex::ActivatePackage(path);
     if (status.ok()) {
       return OK;
@@ -1012,7 +1020,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       print_help(err, "deactivatePackage requires one package_path");
       return BAD_VALUE;
     }
-    std::string path = String8(args[1]).string();
+    std::string path = String8(args[1]).c_str();
     auto status = ::android::apex::DeactivatePackage(path);
     if (status.ok()) {
       return OK;
@@ -1057,7 +1065,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to query session: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -1089,7 +1097,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to submit session: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }
@@ -1100,7 +1108,7 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "remountPackages failed: "
-                                  << status.toString8().string() << std::endl;
+                                  << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }

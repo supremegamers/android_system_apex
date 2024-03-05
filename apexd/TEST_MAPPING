@@ -16,6 +16,9 @@
     },
     {
       "path": "vendor/xts/gts-tests/hostsidetests/stagedinstall"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/apexutil"
     }
   ]
 }

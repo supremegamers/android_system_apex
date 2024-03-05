@@ -434,7 +434,6 @@ Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
 }
 
 Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
-  std::string opened_device;
   const std::vector<std::string> candidate_devices = {
       StringPrintf("/dev/block/loop%d", num),
       StringPrintf("/dev/loop%d", num),

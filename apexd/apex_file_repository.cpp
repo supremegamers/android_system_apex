@@ -261,6 +261,18 @@ Result<int> ApexFileRepository::AddBlockApex(
 
     const std::string& name = apex_file->GetManifest().name();
 
+    // When metadata specifies the manifest name and version of the apex, it
+    // should match what we see in the manifest.
+    if (apex_config.manifest_name() != "" &&
+        apex_config.manifest_name() != name) {
+      return Error() << "manifest name doesn't match: " << apex_path;
+    }
+
+    if (apex_config.manifest_version() != 0 &&
+        apex_config.manifest_version() != apex_file->GetManifest().version()) {
+      return Error() << "manifest version doesn't match: " << apex_path;
+    }
+
     BlockApexOverride overrides;
 
     // A block device doesn't have an inherent timestamp, so it is carried in

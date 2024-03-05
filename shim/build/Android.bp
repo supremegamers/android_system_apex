@@ -252,6 +252,7 @@ genrule {
   name: "generate_hash_v1",
   srcs: [
     ":com.android.apex.cts.shim.v2",
+    ":com.android.apex.cts.shim.v2_add_apk_to_apex",
     ":com.android.apex.cts.shim.v2_without_apk_in_apex",
     ":com.android.apex.cts.shim.v2_additional_file",
     ":com.android.apex.cts.shim.v2_additional_folder",
@@ -296,20 +297,6 @@ apex {
   apps: ["CtsShim", "CtsShimPriv"],
   allowed_files: "default_shim_allowed_list.txt",
   updatable: false,
-}
-
-// This is to install the flattened version of com.android.apex.cts.shim.
-// Because com.android.apex.cts.shim is provided as prebuilt and the build system
-// doesn't support install "flattened" version from "prebult" yet, GSI, which should
-// have both "flatttened" and "unflattened" APEXes, is missing the flattened version
-// of com.android.apex.cts.shim.
-// TODO(b/159426728):  When the build system can install "flattened" from "prebuilts",
-// this can be removed.
-override_apex {
-  name: "com.android.apex.cts.shim.v1_with_prebuilts",
-  base: "com.android.apex.cts.shim.v1",
-  apps: ["CtsShimPrebuilt", "CtsShimPrivPrebuilt"],
-  allowed_files: "prebuilts_shim_allowed_list.txt",
 }
 
 genrule {
@@ -633,6 +620,18 @@ apex {
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
   prebuilts: ["hash_of_dev_null"],
+  installable: false,
+  updatable: false,
+}
+
+// Apex shim for running a new app in an apex
+apex {
+  name: "com.android.apex.cts.shim.v2_add_apk_to_apex",
+  manifest: "manifest_v2.json",
+  file_contexts: ":apex.test-file_contexts",
+  key: "com.android.apex.cts.shim.key",
+  prebuilts: ["hash_of_dev_null"],
+  apps: ["CtsShimAddApkToApex"],
   installable: false,
   updatable: false,
 }

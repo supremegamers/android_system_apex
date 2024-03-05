@@ -48,15 +48,6 @@ namespace android {
 namespace apex {
 namespace testing {
 
-template <typename T>
-inline ::testing::AssertionResult IsOk(const android::base::Result<T>& result) {
-  if (result.ok()) {
-    return ::testing::AssertionSuccess() << " is Ok";
-  } else {
-    return ::testing::AssertionFailure() << " failed with " << result.error();
-  }
-}
-
 inline ::testing::AssertionResult IsOk(const android::binder::Status& status) {
   if (status.isOk()) {
     return ::testing::AssertionSuccess() << " is Ok";
@@ -207,7 +198,11 @@ class MountNamespaceRestorer final {
 
   ~MountNamespaceRestorer() {
     if (original_namespace_.get() != -1) {
-      if (setns(original_namespace_.get(), CLONE_NEWNS) == -1) {
+      // Since apexd is a multithread process. setns(fd, CLONE_NEWNS) may not
+      // work (fail with EINVAL). Retrying until success fixes it. This is
+      // acceptable since this class is for only tests. In the worst case tests
+      // will hang with bunch of logs.
+      while (setns(original_namespace_.get(), CLONE_NEWNS) == -1) {
         PLOG(ERROR) << "Failed to switch back to " << original_namespace_.get();
       }
     }
@@ -357,11 +352,43 @@ inline base::Result<loop::LoopbackDeviceUniqueFd> MountViaLoopDevice(
   return loop_device;
 }
 
-inline base::Result<loop::LoopbackDeviceUniqueFd> WriteBlockApex(
-    const std::string& apex_file, const std::string& apex_path) {
+// Represents a Block APEX in tests, which is represented as a loop-mounted
+// file. Created with WriteBlockApex() below. On exit, it umounts the mountpoint
+// first, and then frees the loop-device.
+struct BlockApex {
+  loop::LoopbackDeviceUniqueFd loop_device;
+  std::string mount_point;
+  BlockApex(loop::LoopbackDeviceUniqueFd&& loop_device,
+            const std::string& mount_point)
+      : loop_device(std::move(loop_device)), mount_point(mount_point) {}
+  BlockApex(BlockApex&& other) noexcept {
+    loop_device = std::move(other.loop_device);
+    mount_point = std::move(other.mount_point);
+  }
+  BlockApex& operator=(BlockApex&& other) noexcept {
+    loop_device = std::move(other.loop_device);
+    mount_point = std::move(other.mount_point);
+    return *this;
+  }
+  ~BlockApex() {
+    if (loop_device.Get() != -1) {
+      if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
+        PLOG(ERROR) << "can't umount.";
+      }
+      loop_device.CloseGood();
+    }
+  }
+};
+
+inline base::Result<BlockApex> WriteBlockApex(const std::string& apex_file,
+                                              const std::string& apex_path) {
   std::string intermediate_path = apex_path + ".intermediate";
   std::filesystem::copy(apex_file, intermediate_path);
-  return MountViaLoopDevice(intermediate_path, apex_path);
+  auto result = MountViaLoopDevice(intermediate_path, apex_path);
+  if (!result.ok()) {
+    return result.error();
+  }
+  return BlockApex(std::move(*result), apex_path);
 }
 
 inline android::base::Result<std::string> GetBlockDeviceForApex(

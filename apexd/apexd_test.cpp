@@ -76,6 +76,7 @@ using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
 using ::testing::Contains;
 using ::testing::ElementsAre;
+using ::testing::EndsWith;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
@@ -143,10 +144,10 @@ class ApexdUnitTest : public ::testing::Test {
     ota_reserved_dir_ = StringPrintf("%s/ota-reserved", td_.path);
     hash_tree_dir_ = StringPrintf("%s/apex-hash-tree", td_.path);
     staged_session_dir_ = StringPrintf("%s/staged-session-dir", td_.path);
-    metadata_sepolicy_staged_dir_ =
-        StringPrintf("%s/metadata-sepolicy-staged-dir", td_.path);
 
-    vm_payload_disk_ = StringPrintf("%s/vm-payload", td_.path);
+    sessions_metadata_dir_ =
+        StringPrintf("%s/metadata-staged-session-dir", td_.path);
+    session_manager_ = ApexSessionManager::Create(sessions_metadata_dir_);
 
     config_ = {kTestApexdStatusSysprop,
                {built_in_dir_},
@@ -155,7 +156,6 @@ class ApexdUnitTest : public ::testing::Test {
                ota_reserved_dir_.c_str(),
                hash_tree_dir_.c_str(),
                staged_session_dir_.c_str(),
-               metadata_sepolicy_staged_dir_.c_str(),
                kTestVmPayloadMetadataPartitionProp,
                kTestActiveApexSelinuxCtx};
   }
@@ -169,9 +169,7 @@ class ApexdUnitTest : public ::testing::Test {
     return StringPrintf("%s/session_%d", staged_session_dir_.c_str(),
                         session_id);
   }
-  const std::string& GetMetadataSepolicyStagedDir() {
-    return metadata_sepolicy_staged_dir_;
-  }
+  ApexSessionManager* GetSessionManager() { return session_manager_.get(); }
 
   std::string GetRootDigest(const ApexFile& apex) {
     if (apex.IsCompressed()) {
@@ -212,18 +210,6 @@ class ApexdUnitTest : public ::testing::Test {
                         target_name.c_str());
   }
 
-  std::string AddBlockApex(const std::string& apex_name,
-                           const std::string& public_key = "",
-                           const std::string& root_digest = "",
-                           bool is_factory = true) {
-    auto apex_path = vm_payload_disk_ + std::to_string(block_device_index_++);
-    auto apex_file = GetTestFile(apex_name);
-    AddToMetadata(apex_name, public_key, root_digest, is_factory);
-    // loop_devices_ will be disposed after each test
-    loop_devices_.push_back(*WriteBlockApex(apex_file, apex_path));
-    return apex_path;
-  }
-
   // Copies the compressed apex to |built_in_dir| and decompresses it to
   // |decompressed_dir| and then hard links to |target_dir|
   std::string PrepareCompressedApex(const std::string& name,
@@ -242,19 +228,20 @@ class ApexdUnitTest : public ::testing::Test {
     return PrepareCompressedApex(name, built_in_dir_);
   }
 
-  Result<ApexSession> CreateStagedSession(const std::string& apex_name,
-                                          int session_id) {
+  void PrepareStagedSession(const std::string& apex_name, int session_id) {
     CreateDirIfNeeded(GetStagedDir(session_id), 0755);
     fs::copy(GetTestFile(apex_name), GetStagedDir(session_id));
-    auto result = ApexSession::CreateSession(session_id);
-    result->SetBuildFingerprint(GetProperty("ro.build.fingerprint", ""));
-    return result;
   }
 
-  void SetBlockApexEnabled(bool enabled) {
-    // The first partition(1) is "metadata" partition
-    base::SetProperty(kTestVmPayloadMetadataPartitionProp,
-                      enabled ? (vm_payload_disk_ + "1") : "");
+  Result<ApexSession> CreateStagedSession(const std::string& apex_name,
+                                          int session_id) {
+    PrepareStagedSession(apex_name, session_id);
+    auto result = session_manager_->CreateSession(session_id);
+    if (!result.ok()) {
+      return result.error();
+    }
+    result->SetBuildFingerprint(GetProperty("ro.build.fingerprint", ""));
+    return result;
   }
 
  protected:
@@ -267,49 +254,31 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(ota_reserved_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(hash_tree_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
-    ASSERT_EQ(mkdir(metadata_sepolicy_staged_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
 
-    DeleteDirContent(ApexSession::GetSessionsDir());
-  }
-  void AddToMetadata(const std::string& apex_name,
-                     const std::string& public_key,
-                     const std::string& root_digest, bool is_factory) {
-    android::microdroid::Metadata metadata;
-    // The first partition is metadata partition
-    auto metadata_partition = vm_payload_disk_ + "1";
-    if (access(metadata_partition.c_str(), F_OK) == 0) {
-      metadata = *android::microdroid::ReadMetadata(metadata_partition);
-    }
-
-    auto apex = metadata.add_apexes();
-    apex->set_name(apex_name);
-    apex->set_public_key(public_key);
-    apex->set_root_digest(root_digest);
-    apex->set_is_factory(is_factory);
-
-    std::ofstream out(metadata_partition);
-    android::microdroid::WriteMetadata(metadata, out);
+    // We don't really need for all the test cases, but until we refactor apexd
+    // to use dependency injection instead of this SetConfig approach, it is not
+    // trivial to figure out which test cases need the session manager, so we
+    // initialize it for all of them.
+    InitializeSessionManager(GetSessionManager());
+    DeleteDirContent(GetSessionsDir());
   }
 
-  void TearDown() override {
-    DeleteDirContent(ApexSession::GetSessionsDir());
-    SetBlockApexEnabled(false);
-  }
+  void TearDown() override { DeleteDirContent(GetSessionsDir()); }
 
- private:
+ protected:
   TemporaryDir td_;
   std::string built_in_dir_;
   std::string data_dir_;
   std::string decompression_dir_;
   std::string ota_reserved_dir_;
   std::string hash_tree_dir_;
-  std::string vm_payload_disk_;
-  std::string vm_payload_metadata_path_;
+
   std::string staged_session_dir_;
-  std::string metadata_sepolicy_staged_dir_;
+  std::string sessions_metadata_dir_;
+  std::unique_ptr<ApexSessionManager> session_manager_;
+
   ApexdConfig config_;
-  std::vector<loop::LoopbackDeviceUniqueFd> loop_devices_;  // to be cleaned up
-  int block_device_index_ = 2;  // "1" is reserved for metadata;
 };
 
 // Apex that does not have pre-installed version, does not get selected
@@ -898,8 +867,13 @@ TEST_F(ApexdUnitTest, GetStagedApexFilesWithChildren) {
 }
 
 // A test fixture to use for tests that mount/unmount apexes.
+// This also supports test-purpose BlockApex via mount.
 class ApexdMountTest : public ApexdUnitTest {
  public:
+  ApexdMountTest() {
+    vm_payload_disk_ = StringPrintf("%s/vm-payload", td_.path);
+  }
+
   void UnmountOnTearDown(const std::string& apex_file) {
     to_unmount_.push_back(apex_file);
   }
@@ -914,6 +888,7 @@ class ApexdMountTest : public ApexdUnitTest {
 
   void TearDown() final {
     ApexdUnitTest::TearDown();
+    SetBlockApexEnabled(false);
     for (const auto& apex : to_unmount_) {
       if (auto status = DeactivatePackage(apex); !status.ok()) {
         LOG(ERROR) << "Failed to unmount " << apex << " : " << status.error();
@@ -921,9 +896,61 @@ class ApexdMountTest : public ApexdUnitTest {
     }
   }
 
+  void SetBlockApexEnabled(bool enabled) {
+    // The first partition(1) is "metadata" partition
+    base::SetProperty(kTestVmPayloadMetadataPartitionProp,
+                      enabled ? (vm_payload_disk_ + "1") : "");
+  }
+
+  std::string AddBlockApex(const std::string& apex_name,
+                           const std::string& public_key = "",
+                           const std::string& root_digest = "",
+                           bool is_factory = true) {
+    auto apex_path = vm_payload_disk_ + std::to_string(block_device_index_++);
+    auto apex_file = GetTestFile(apex_name);
+    AddToMetadata(apex_name, public_key, root_digest, is_factory);
+    // block_apexes_ will be disposed after each test
+    auto block_apex = WriteBlockApex(apex_file, apex_path);
+    if (!block_apex.ok()) {
+      PLOG(ERROR) << block_apex.error();
+    }
+    block_apexes_.push_back(std::move(*block_apex));
+    return apex_path;
+  }
+
+  void AddToMetadata(const std::string& apex_name,
+                     const std::string& public_key,
+                     const std::string& root_digest, bool is_factory) {
+    android::microdroid::Metadata metadata;
+    // The first partition is metadata partition
+    auto metadata_partition = vm_payload_disk_ + "1";
+    if (access(metadata_partition.c_str(), F_OK) == 0) {
+      auto result = android::microdroid::ReadMetadata(metadata_partition);
+      ASSERT_THAT(result, Ok());
+      metadata = *result;
+    }
+
+    auto apex = metadata.add_apexes();
+    apex->set_name(apex_name);
+    apex->set_public_key(public_key);
+    apex->set_root_digest(root_digest);
+    apex->set_is_factory(is_factory);
+
+    std::ofstream out(metadata_partition);
+    ASSERT_THAT(android::microdroid::WriteMetadata(metadata, out), Ok());
+  }
+
  private:
   MountNamespaceRestorer restorer_;
   std::vector<std::string> to_unmount_;
+
+  // Block APEX specific stuff.
+  std::string vm_payload_disk_;
+  int block_device_index_ = 2;  // "1" is reserved for metadata;
+  // This should be freed before ~MountNamespaceRestorer() because it
+  // switches to the original mount namespace while block apexes are mounted
+  // in test-purpose mount namespace.
+  std::vector<BlockApex> block_apexes_;
 };
 
 // TODO(b/187864524): cover other negative scenarios.
@@ -934,14 +961,16 @@ TEST_F(ApexdMountTest, InstallPackageRejectsApexWithoutRebootlessSupport) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(GetTestFile("apex.apexd_test.apex"));
+  auto ret =
+      InstallPackage(GetTestFile("apex.apexd_test.apex"), /* force= */ false);
   ASSERT_THAT(
       ret,
       HasError(WithMessage(HasSubstr("does not support non-staged update"))));
 }
 
 TEST_F(ApexdMountTest, InstallPackageRejectsNoPreInstalledApex) {
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"),
+                            /* force= */ false);
   ASSERT_THAT(
       ret, HasError(WithMessage(HasSubstr(
                "No active version found for package test.apex.rebootless"))));
@@ -955,7 +984,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsNoHashtree) {
   UnmountOnTearDown(file_path);
 
   auto ret =
-      InstallPackage(GetTestFile("test.rebootless_apex_v2_no_hashtree.apex"));
+      InstallPackage(GetTestFile("test.rebootless_apex_v2_no_hashtree.apex"),
+                     /* force= */ false);
   ASSERT_THAT(
       ret,
       HasError(WithMessage(HasSubstr(" does not have an embedded hash tree"))));
@@ -965,7 +995,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsNoActiveApex) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(
       ret, HasError(WithMessage(HasSubstr(
                "No active version found for package test.apex.rebootless"))));
@@ -978,8 +1009,9 @@ TEST_F(ApexdMountTest, InstallPackageRejectsManifestMismatch) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(
-      GetTestFile("test.rebootless_apex_manifest_mismatch.apex"));
+  auto ret =
+      InstallPackage(GetTestFile("test.rebootless_apex_manifest_mismatch.apex"),
+                     /* force= */ false);
   ASSERT_THAT(
       ret,
       HasError(WithMessage(HasSubstr(
@@ -993,7 +1025,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsCorrupted) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_corrupted.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_corrupted.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret,
               HasError(WithMessage(HasSubstr("Can't verify /dev/block/dm-"))));
 }
@@ -1006,7 +1039,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsProvidesSharedLibs) {
   UnmountOnTearDown(file_path);
 
   auto ret = InstallPackage(
-      GetTestFile("test.rebootless_apex_provides_sharedlibs.apex"));
+      GetTestFile("test.rebootless_apex_provides_sharedlibs.apex"),
+      /* force= */ false);
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr(" is a shared libs APEX"))));
 }
 
@@ -1018,7 +1052,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsProvidesNativeLibs) {
   UnmountOnTearDown(file_path);
 
   auto ret = InstallPackage(
-      GetTestFile("test.rebootless_apex_provides_native_libs.apex"));
+      GetTestFile("test.rebootless_apex_provides_native_libs.apex"),
+      /* force= */ false);
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr(" provides native libs"))));
 }
 
@@ -1030,7 +1065,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsRequiresSharedApexLibs) {
   UnmountOnTearDown(file_path);
 
   auto ret = InstallPackage(
-      GetTestFile("test.rebootless_apex_requires_shared_apex_libs.apex"));
+      GetTestFile("test.rebootless_apex_requires_shared_apex_libs.apex"),
+      /* force= */ false);
   ASSERT_THAT(ret,
               HasError(WithMessage(HasSubstr(" requires shared apex libs"))));
 }
@@ -1042,7 +1078,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsJniLibs) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_jni_libs.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_jni_libs.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr(" requires JNI libs"))));
 }
 
@@ -1054,7 +1091,8 @@ TEST_F(ApexdMountTest, InstallPackageAcceptsAddRequiredNativeLib) {
   UnmountOnTearDown(file_path);
 
   auto ret =
-      InstallPackage(GetTestFile("test.rebootless_apex_add_native_lib.apex"));
+      InstallPackage(GetTestFile("test.rebootless_apex_add_native_lib.apex"),
+                     /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 }
@@ -1066,8 +1104,9 @@ TEST_F(ApexdMountTest, InstallPackageAcceptsRemoveRequiredNativeLib) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(
-      GetTestFile("test.rebootless_apex_remove_native_lib.apex"));
+  auto ret =
+      InstallPackage(GetTestFile("test.rebootless_apex_remove_native_lib.apex"),
+                     /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 }
@@ -1079,8 +1118,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsAppInApex) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret =
-      InstallPackage(GetTestFile("test.rebootless_apex_app_in_apex.apex"));
+  auto ret = InstallPackage(
+      GetTestFile("test.rebootless_apex_app_in_apex.apex"), /* force= */ false);
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr("contains app inside"))));
 }
 
@@ -1092,7 +1131,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsPrivAppInApex) {
   UnmountOnTearDown(file_path);
 
   auto ret =
-      InstallPackage(GetTestFile("test.rebootless_apex_priv_app_in_apex.apex"));
+      InstallPackage(GetTestFile("test.rebootless_apex_priv_app_in_apex.apex"),
+                     /* force= */ false);
   ASSERT_THAT(ret,
               HasError(WithMessage(HasSubstr("contains priv-app inside"))));
 }
@@ -1110,7 +1150,8 @@ TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActive) {
     ASSERT_EQ(active_apex->GetPath(), file_path);
   }
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1157,7 +1198,8 @@ TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActiveSamegrade) {
     ASSERT_EQ(active_apex->GetPath(), file_path);
   }
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1200,7 +1242,8 @@ TEST_F(ApexdMountTest, InstallPackageUnloadOldApex) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1216,7 +1259,8 @@ TEST_F(ApexdMountTest, InstallPackageWithService) {
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_service_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_service_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   auto manifest = ReadManifest("/apex/test.apex.rebootless/apex_manifest.pb");
   ASSERT_THAT(manifest, Ok());
@@ -1238,7 +1282,8 @@ TEST_F(ApexdMountTest, InstallPackageDataVersionActive) {
     ASSERT_EQ(active_apex->GetPath(), file_path);
   }
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1287,7 +1332,8 @@ TEST_F(ApexdMountTest, InstallPackageResolvesPathCollision) {
     ASSERT_EQ(active_apex->GetPath(), file_path);
   }
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v1.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1339,7 +1385,8 @@ TEST_F(ApexdMountTest, InstallPackageDataVersionActiveSamegrade) {
     ASSERT_EQ(active_apex->GetPath(), file_path);
   }
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -1390,7 +1437,8 @@ TEST_F(ApexdMountTest, InstallPackageUnmountFailsPreInstalledApexActive) {
                     O_RDONLY | O_CLOEXEC));
   ASSERT_NE(-1, fd.get());
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Not(Ok()));
 
   auto apex_mounts = GetApexMounts();
@@ -1435,7 +1483,8 @@ TEST_F(ApexdMountTest, InstallPackageUnmountFailedUpdatedApexActive) {
                     O_RDONLY | O_CLOEXEC));
   ASSERT_NE(-1, fd.get());
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Not(Ok()));
 
   auto apex_mounts = GetApexMounts();
@@ -1476,7 +1525,8 @@ TEST_F(ApexdMountTest, InstallPackageUpdatesApexInfoList) {
   // Check /apex/apex-info-list.xml was created.
   ASSERT_EQ(0, access("/apex/apex-info-list.xml", F_OK));
 
-  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
+                            /* force= */ false);
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
 
@@ -3049,150 +3099,6 @@ TEST_F(ApexdMountTest,
                                    ApexInfoXmlEq(apex_info_xml_2)));
 }
 
-void PrepareFlattenedApex(const std::string& apex_dir,
-                          const std::string& apex_name, int version) {
-  ASSERT_EQ(mkdir(apex_dir.c_str(), 0755), 0);
-
-  ::apex::proto::ApexManifest manifest;
-  manifest.set_name(apex_name);
-  manifest.set_version(version);
-  manifest.set_versionname(std::to_string(version));
-
-  std::string out;
-  manifest.SerializeToString(&out);
-  ASSERT_TRUE(WriteStringToFile(out, apex_dir + "/apex_manifest.pb"));
-}
-
-TEST_F(ApexdMountTest, ActivateFlattenedApex) {
-  std::string apex_dir_1 = GetBuiltInDir() + "/com.android.apex.test_package";
-  std::string apex_dir_2 = GetBuiltInDir() + "/com.android.apex.test_package_2";
-  PrepareFlattenedApex(apex_dir_1, "com.android.apex.test_package", 2);
-  PrepareFlattenedApex(apex_dir_2, "com.android.apex.test_package_2", 1);
-
-  ASSERT_EQ(ActivateFlattenedApex(), 0);
-
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package_2"));
-
-  ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
-  ASSERT_EQ(GetSelinuxContext("/apex/apex-info-list.xml"),
-            "u:object_r:apex_info_file:s0");
-
-  auto info_list =
-      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
-  ASSERT_TRUE(info_list.has_value());
-  auto apex_info_xml_1 = com::android::apex::ApexInfo(
-      /* moduleName= */ "com.android.apex.test_package",
-      /* modulePath= */ apex_dir_1,
-      /* preinstalledModulePath= */ apex_dir_1,
-      /* versionCode= */ 2, /* versionName= */ "2",
-      /* isFactory= */ true, /* isActive= */ true,
-      /* lastUpdateMillis= */ 0,
-      /* provideSharedApexLibs= */ false);
-  auto apex_info_xml_2 = com::android::apex::ApexInfo(
-      /* moduleName= */ "com.android.apex.test_package_2",
-      /* modulePath= */ apex_dir_2,
-      /* preinstalledModulePath= */ apex_dir_2,
-      /* versionCode= */ 1, /* versionName= */ "1",
-      /* isFactory= */ true, /* isActive= */ true,
-      /* lastUpdateMillis= */ 0,
-      /* provideSharedApexLibs= */ false);
-
-  ASSERT_THAT(info_list->getApexInfo(),
-              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
-                                   ApexInfoXmlEq(apex_info_xml_2)));
-}
-
-TEST_F(ApexdMountTest, ActivateFlattenedApexShouldFailWithDuplicate) {
-  // Two flattened APEXes with the same name
-  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package",
-                       "com.android.apex.test_package", 1);
-  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package_2",
-                       "com.android.apex.test_package", 1);
-
-  CaptureStderr();
-  ASSERT_EQ(ActivateFlattenedApex(), 1);
-  std::string error = GetCapturedStderr();
-  ASSERT_THAT(error,
-              HasSubstr("duplicate of com.android.apex.test_package found"));
-}
-
-TEST_F(ApexdMountTest, ActivateFlattenedApexSupportsMultiApex) {
-  auto apex_dir = GetBuiltInDir() + "/com.android.apex.test_package";
-  // Two flattened APEXes with the same name
-  PrepareFlattenedApex(apex_dir, "com.android.apex.test_package", 1);
-  PrepareFlattenedApex(apex_dir + "_something_else",
-                       "com.android.apex.test_package", 1);
-
-  // With sysprop indicating multi-apex
-  std::string property_prefix = "debug.apexd.test.persistprefix.";
-  android::base::SetProperty(property_prefix + "com.android.apex.test_package",
-                             "com.android.apex.test_package");
-
-  ASSERT_EQ(ActivateFlattenedApex({property_prefix}), 0);  // Succeeds
-
-  // apex-info-list.xml should have original paths (realpaths) not symlinks
-  auto info_list =
-      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
-  ASSERT_TRUE(info_list.has_value());
-  auto apex_info = com::android::apex::ApexInfo(
-      /* moduleName= */ "com.android.apex.test_package",
-      /* modulePath= */ apex_dir,
-      /* preinstalledModulePath= */ apex_dir,
-      /* versionCode= */ 1, /* versionName= */ "1",
-      /* isFactory= */ true, /* isActive= */ true,
-      /* lastUpdateMillis= */ 0,
-      /* provideSharedApexLibs= */ false);
-  ASSERT_THAT(info_list->getApexInfo(), ElementsAre(ApexInfoXmlEq(apex_info)));
-
-  android::base::SetProperty(property_prefix + "com.android.apex.test_package",
-                             "");
-}
-
-TEST_F(ApexdMountTest, ActivateFlattenedApexShouldHaveRealPaths) {
-  // Prepare flattened apexes somewhere else
-  TemporaryDir dir;
-  auto apex_dir_1 = fmt::format("{}/apex1", dir.path);
-  auto apex_dir_2 = fmt::format("{}/apex2", dir.path);
-  PrepareFlattenedApex(apex_dir_1, "com.android.apex.test_package", 2);
-  PrepareFlattenedApex(apex_dir_2, "com.android.apex.test_package_2", 1);
-
-  // Symlink flattened apexes under builtin dir.
-  auto symlink_apex_dir1 = fmt::format("{}/apex1", GetBuiltInDir());
-  auto symlink_apex_dir2 = fmt::format("{}/apex2", GetBuiltInDir());
-  ASSERT_EQ(0, symlink(apex_dir_1.c_str(), symlink_apex_dir1.c_str()));
-  ASSERT_EQ(0, symlink(apex_dir_2.c_str(), symlink_apex_dir2.c_str()));
-
-  ASSERT_EQ(ActivateFlattenedApex(), 0);
-
-  // apex-info-list.xml should have original paths (realpaths) not symlinks
-  auto info_list =
-      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
-  ASSERT_TRUE(info_list.has_value());
-  auto apex_info_xml_1 = com::android::apex::ApexInfo(
-      /* moduleName= */ "com.android.apex.test_package",
-      /* modulePath= */ apex_dir_1,
-      /* preinstalledModulePath= */ apex_dir_1,
-      /* versionCode= */ 2, /* versionName= */ "2",
-      /* isFactory= */ true, /* isActive= */ true,
-      /* lastUpdateMillis= */ 0,
-      /* provideSharedApexLibs= */ false);
-  auto apex_info_xml_2 = com::android::apex::ApexInfo(
-      /* moduleName= */ "com.android.apex.test_package_2",
-      /* modulePath= */ apex_dir_2,
-      /* preinstalledModulePath= */ apex_dir_2,
-      /* versionCode= */ 1, /* versionName= */ "1",
-      /* isFactory= */ true, /* isActive= */ true,
-      /* lastUpdateMillis= */ 0,
-      /* provideSharedApexLibs= */ false);
-
-  ASSERT_THAT(info_list->getApexInfo(),
-              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
-                                   ApexInfoXmlEq(apex_info_xml_2)));
-}
-
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
   MockCheckpointInterface checkpoint_interface;
   // Need to call InitializeVold before calling OnStart
@@ -4464,117 +4370,117 @@ TEST_F(ApexdMountTest, AddBlockApexFailsWithCompressedDuplicate) {
                   "duplicate of com.android.apex.compressed found"))));
 }
 
-TEST_F(ApexdMountTest, CopySepolicyToMetadata) {
-  std::string file_path = AddPreInstalledApex("com.android.sepolicy.apex");
-  ASSERT_THAT(
-      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
-      Ok());
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-  ASSERT_THAT(CreateStagedSession("com.android.sepolicy.apex", 666), Ok());
-
-  ASSERT_THAT(
-      SubmitStagedSession(666, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1),
-      Ok());
-
-  auto staged_dir = GetMetadataSepolicyStagedDir();
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip"), HasValue(true));
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.sig"), HasValue(true));
-}
-
-TEST_F(ApexdMountTest, AbortSepolicyApexInstall) {
-  std::string file_path = AddPreInstalledApex("com.android.sepolicy.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-  ASSERT_THAT(CreateStagedSession("com.android.sepolicy.apex", 666), Ok());
-  ASSERT_THAT(
-      SubmitStagedSession(666, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1),
-      Ok());
-
-  auto staged_dir = GetMetadataSepolicyStagedDir();
-  ASSERT_THAT(PathExists(staged_dir), HasValue(true));
-  ASSERT_FALSE(IsEmptyDirectory(staged_dir));
-
-  ASSERT_THAT(AbortStagedSession(666), Ok());
-  ASSERT_THAT(PathExists(staged_dir), HasValue(false));
-}
-
 class ApexActivationFailureTests : public ApexdMountTest {};
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->SetBuildFingerprint("wrong fingerprint");
-  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  ASSERT_RESULT_OK(apex_session->UpdateStateAndCommit(SessionState::STAGED));
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("APEX build fingerprint has changed"));
 }
 
 TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
   // Delete the apex file in staging directory
   DeleteDirContent(GetStagedDir(123));
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("No APEX packages found"));
 }
 
 TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   CreateStagedSession("com.android.apex.compressed.v1_original.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("More than one APEX package found"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session =
       CreateStagedSession("apex.apexd_test_corrupt_superblock_apex.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  ASSERT_RESULT_OK(apex_session);
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Couldn't find filesystem magic"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("corrupted_b146895998.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Activation failed for packages"));
 }
 
 TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto shim_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session =
       CreateStagedSession("com.android.apex.cts.shim.v2_wrong_sha.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(shim_path);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Failed to activate packages"));
   ASSERT_THAT(apex_session->GetErrorMessage(),
@@ -4590,15 +4496,17 @@ TEST_F(ApexActivationFailureTests,
 
   auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_EQ(apex_session->GetState(), SessionState::ACTIVATION_FAILED);
   ASSERT_THAT(
       apex_session->GetErrorMessage(),
@@ -4614,15 +4522,17 @@ TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
 
   auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_EQ(apex_session->GetState(), SessionState::REVERTED);
 }
 
@@ -4812,7 +4722,7 @@ TEST_F(ApexdUnitTest, RevertStoresCrashingNativeProcess) {
               Ok());
 
   ASSERT_THAT(RevertActiveSessions("test_process", ""), Ok());
-  apex_session = ApexSession::GetSession(1543);
+  apex_session = GetSessionManager()->GetSession(1543);
   ASSERT_THAT(apex_session, Ok());
   ASSERT_EQ(apex_session->GetCrashingNativeProcess(), "test_process");
 }
@@ -4957,7 +4867,7 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
 
   // Quick check that session was activated
   {
-    auto session = ApexSession::GetSession(37);
+    auto session = GetSessionManager()->GetSession(37);
     ASSERT_THAT(session, Ok());
     ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
   }
@@ -4988,7 +4898,7 @@ TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
 
   // Quick check that session was activated
   {
-    auto session = ApexSession::GetSession(73);
+    auto session = GetSessionManager()->GetSession(73);
     ASSERT_THAT(session, Ok());
     ASSERT_NE(session->GetState(), SessionState::ACTIVATED);
   }
@@ -5022,6 +4932,54 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   auto apex_file = ApexFile::Open(preinstalled_apex);
   ASSERT_THAT(apex_file, Ok());
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
+  MockCheckpointInterface checkpoint_interface;
+  checkpoint_interface.SetSupportsCheckpoint(true);
+  InitializeVold(&checkpoint_interface);
+
+  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+
+  ASSERT_RESULT_OK(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}));
+
+  UnmountOnTearDown(preinstalled_apex);
+
+  // First simulate existence of a bunch of sessions.
+  auto session1 = GetSessionManager()->CreateSession(37);
+  ASSERT_RESULT_OK(session1);
+  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::VERIFIED));
+
+  auto session2 = GetSessionManager()->CreateSession(57);
+  ASSERT_RESULT_OK(session2);
+  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
+
+  auto session3 = GetSessionManager()->CreateSession(73);
+  ASSERT_RESULT_OK(session3);
+  ASSERT_RESULT_OK(session3->UpdateStateAndCommit(SessionState::SUCCESS));
+
+  PrepareStagedSession("apex.apexd_test.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  std::sort(
+      sessions.begin(), sessions.end(),
+      [](const auto& s1, const auto& s2) { return s1.GetId() < s2.GetId(); });
+
+  ASSERT_EQ(4u, sessions.size());
+
+  ASSERT_EQ(37, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+
+  ASSERT_EQ(57, sessions[1].GetId());
+  ASSERT_EQ(SessionState::STAGED, sessions[1].GetState());
+
+  ASSERT_EQ(73, sessions[2].GetId());
+  ASSERT_EQ(SessionState::SUCCESS, sessions[2].GetState());
+
+  ASSERT_EQ(239, sessions[3].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[3].GetState());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

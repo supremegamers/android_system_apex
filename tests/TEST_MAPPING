@@ -11,9 +11,6 @@
     },
     {
       "name": "CtsApexSharedLibrariesTestCases"
-    },
-    {
-      "name": "VendorApexHostTestCases"
     }
   ],
   "presubmit-large": [
@@ -42,6 +39,9 @@
     },
     {
       "name": "apex_compression_platform_tests"
+    },
+    {
+      "name": "VendorApexHostTestCases"
     }
   ],
   "imports": [

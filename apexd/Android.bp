@@ -80,6 +80,7 @@ cc_defaults {
   shared_libs: [
     "liblog",
     "liblogwrap",
+    "libvintf",
   ],
   static_libs: [
     "libapex",
@@ -161,6 +162,7 @@ cc_binary {
   ],
   exclude_shared_libs: [
     "libprotobuf-cpp-full",
+    "libvintf",
   ],
   // Just like the init, apexd should be able to run without
   // any APEX activated. To do so, it uses the bootstrap linker
@@ -187,6 +189,7 @@ cc_library_static {
     "apexd_private.cpp",
     "apexd_session.cpp",
     "apexd_verity.cpp",
+    "apexd_vendor_apex.cpp",
   ],
   export_include_dirs: ["."],
   generated_sources: ["apex-info-list-tinyxml"],
@@ -282,24 +285,6 @@ cc_library_static {
     "libutils_headers",
   ],
   export_include_dirs: ["."],
-}
-
-cc_binary_host {
-  name: "dump_apex_info",
-  defaults: [
-    "apex_flags_defaults",
-    "libapex-deps",
-  ],
-  static_libs: [
-    "libapex",
-  ],
-  srcs: [
-    "dump_apex_info.cpp",
-  ],
-  shared_libs: [
-    "libtinyxml2",
-  ],
-  generated_sources: ["apex-info-list-tinyxml"],
 }
 
 genrule {
@@ -518,7 +503,6 @@ cc_test {
     ":com.android.apex.compressed.v1_original",
     ":com.android.apex.compressed.v2",
     ":com.android.apex.compressed.v2_original",
-    ":com.android.sepolicy",
     ":gen_manifest_mismatch_compressed_apex_v2",
     "apexd_testdata/com.android.apex.test_package.avbpubkey",
     "apexd_testdata/com.android.apex.compressed.avbpubkey",
@@ -624,7 +608,6 @@ cc_test {
     ":com.android.apex.compressed.v1_original",
     ":com.android.apex.compressed.v2",
     ":com.android.apex.compressed.v2_original",
-    ":com.android.sepolicy",
     ":gen_manifest_mismatch_compressed_apex_v2",
     "apexd_testdata/com.android.apex.test_package.avbpubkey",
     "apexd_testdata/com.android.apex.compressed.avbpubkey",
@@ -666,24 +649,6 @@ cc_test {
   generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexServiceTestCases.xml",
-}
-
-cc_test {
-  name: "flattened_apex_test",
-  defaults: [
-    "apex_flags_defaults",
-    "libapex-deps",
-    "libapexd-deps"
-  ],
-  srcs: ["flattened_apex_test.cpp"],
-  host_supported: false,
-  compile_multilib: "first",
-  static_libs: [
-    "libapex",
-    "libapexd",
-  ],
-  test_suites: ["device-tests"],
-  test_config: "flattened_apex_test_config.xml",
 }
 
 xsd_config {

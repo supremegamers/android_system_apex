@@ -14,29 +14,31 @@
  * limitations under the License.
  */
 
-#include <string>
-
-#include <errno.h>
-#include <sys/stat.h>
+#include "apexd_verity.h"
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/result-gmock.h>
 #include <android-base/stringprintf.h>
+#include <errno.h>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+
+#include <string>
 
 #include "apex_file.h"
 #include "apexd_test_utils.h"
-#include "apexd_verity.h"
 
 namespace android {
 namespace apex {
 
 using namespace std::literals;
 
-using android::apex::testing::IsOk;
 using android::base::GetExecutableDirectory;
 using android::base::ReadFileToString;
 using android::base::StringPrintf;
+using android::base::testing::Ok;
+using ::testing::Not;
 
 static std::string GetTestDataDir() { return GetExecutableDirectory(); }
 static std::string GetTestFile(const std::string& name) {
@@ -47,13 +49,13 @@ TEST(ApexdVerityTest, ReusesHashtree) {
   TemporaryDir td;
 
   auto apex = ApexFile::Open(GetTestFile("apex.apexd_test_no_hashtree.apex"));
-  ASSERT_TRUE(IsOk(apex));
+  ASSERT_RESULT_OK(apex);
   auto verity_data = apex->VerifyApexVerity(apex->GetBundledPublicKey());
-  ASSERT_TRUE(IsOk(verity_data));
+  ASSERT_RESULT_OK(verity_data);
 
   auto hashtree_file = StringPrintf("%s/hashtree", td.path);
   auto status = PrepareHashTree(*apex, *verity_data, hashtree_file);
-  ASSERT_TRUE(IsOk(status));
+  ASSERT_RESULT_OK(status);
   ASSERT_EQ(KRegenerate, *status);
 
   std::string first_hashtree;
@@ -63,7 +65,7 @@ TEST(ApexdVerityTest, ReusesHashtree) {
   // Now call PrepareHashTree again. Since digest matches, hashtree should be
   // reused.
   status = PrepareHashTree(*apex, *verity_data, hashtree_file);
-  ASSERT_TRUE(IsOk(status));
+  ASSERT_RESULT_OK(status);
   ASSERT_EQ(kReuse, *status);
 
   std::string second_hashtree;
@@ -79,13 +81,13 @@ TEST(ApexdVerityTest, RegenerateHashree) {
   TemporaryDir td;
 
   auto apex = ApexFile::Open(GetTestFile("apex.apexd_test_no_hashtree.apex"));
-  ASSERT_TRUE(IsOk(apex));
+  ASSERT_RESULT_OK(apex);
   auto verity_data = apex->VerifyApexVerity(apex->GetBundledPublicKey());
-  ASSERT_TRUE(IsOk(verity_data));
+  ASSERT_RESULT_OK(verity_data);
 
   auto hashtree_file = StringPrintf("%s/hashtree", td.path);
   auto status = PrepareHashTree(*apex, *verity_data, hashtree_file);
-  ASSERT_TRUE(IsOk(status));
+  ASSERT_RESULT_OK(status);
   ASSERT_EQ(KRegenerate, *status);
 
   std::string first_hashtree;
@@ -94,14 +96,14 @@ TEST(ApexdVerityTest, RegenerateHashree) {
 
   auto apex2 =
       ApexFile::Open(GetTestFile("apex.apexd_test_no_hashtree_2.apex"));
-  ASSERT_TRUE(IsOk(apex2));
+  ASSERT_RESULT_OK(apex2);
   auto verity_data2 = apex2->VerifyApexVerity(apex2->GetBundledPublicKey());
-  ASSERT_TRUE(IsOk(verity_data2));
+  ASSERT_RESULT_OK(verity_data2);
 
   // Now call PrepareHashTree again. Since digest doesn't match, hashtree
   // should be regenerated.
   status = PrepareHashTree(*apex2, *verity_data2, hashtree_file);
-  ASSERT_TRUE(IsOk(status));
+  ASSERT_RESULT_OK(status);
   ASSERT_EQ(KRegenerate, *status);
 
   std::string second_hashtree;
@@ -117,11 +119,11 @@ TEST(ApexdVerityTest, CannotPrepareHashTreeForCompressedApex) {
 
   auto apex =
       ApexFile::Open(GetTestFile("com.android.apex.compressed.v1.capex"));
-  ASSERT_TRUE(IsOk(apex));
+  ASSERT_RESULT_OK(apex);
   std::string hash_tree;
   ApexVerityData verity_data;
   auto result = PrepareHashTree(*apex, verity_data, hash_tree);
-  ASSERT_FALSE(IsOk(result));
+  ASSERT_THAT(result, Not(Ok()));
   ASSERT_THAT(
       result.error().message(),
       ::testing::HasSubstr("Cannot prepare HashTree of compressed APEX"));

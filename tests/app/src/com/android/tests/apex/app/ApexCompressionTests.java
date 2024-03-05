@@ -69,6 +69,14 @@ public class ApexCompressionTests {
                 .dropShellPermissionIdentity();
     }
 
+    /**
+     * Check if the given package is pre-installed and not have been updated.
+     */
+    private boolean isFactoryPackage(PackageInfo pi) {
+        return (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+            && (pi.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+    }
+
     @Test
     public void testDecompressedApexIsConsideredFactory() throws Exception {
         // Only retrieve active apex package
@@ -78,8 +86,7 @@ public class ApexCompressionTests {
         assertThat(pi.isApex).isTrue();
         assertThat(pi.packageName).isEqualTo(COMPRESSED_APEX_PACKAGE_NAME);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isTrue();
+        assertThat(isFactoryPackage(pi)).isTrue();
     }
 
     @Test
@@ -102,8 +109,7 @@ public class ApexCompressionTests {
         assertThat(pi.isApex).isTrue();
         assertThat(pi.packageName).isEqualTo(COMPRESSED_APEX_PACKAGE_NAME);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isTrue();
+        assertThat(isFactoryPackage(pi)).isTrue();
         assertThat(pi.applicationInfo.sourceDir).startsWith("/system/apex");
     }
 
@@ -116,8 +122,7 @@ public class ApexCompressionTests {
         assertThat(pi.isApex).isTrue();
         assertThat(pi.packageName).isEqualTo(COMPRESSED_APEX_PACKAGE_NAME);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isTrue();
+        assertThat(isFactoryPackage(pi)).isTrue();
     }
 
     @Test
@@ -126,8 +131,7 @@ public class ApexCompressionTests {
         PackageInfo pi = mPm.getPackageInfo(
                 COMPRESSED_APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isTrue();
+        assertThat(isFactoryPackage(pi)).isTrue();
         assertThat(pi.applicationInfo.sourceDir).startsWith("/data/apex/decompressed/");
 
         Install.single(UNCOMPRESSED_APEX_V2).setStaged().setEnableRollback().commit();
@@ -139,8 +143,7 @@ public class ApexCompressionTests {
         PackageInfo pi = mPm.getPackageInfo(
                 COMPRESSED_APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
         assertThat(pi.getLongVersionCode()).isEqualTo(2);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isFalse();
+        assertThat(isFactoryPackage(pi)).isFalse();
         assertThat(pi.applicationInfo.sourceDir).startsWith("/data/apex/active/");
 
         // Trigger rollback
@@ -154,8 +157,7 @@ public class ApexCompressionTests {
         PackageInfo pi = mPm.getPackageInfo(
                 COMPRESSED_APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
-        boolean isFactoryPackage = (pi.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        assertThat(isFactoryPackage).isFalse();
+        assertThat(isFactoryPackage(pi)).isFalse();
         assertThat(pi.applicationInfo.sourceDir).startsWith("/data/apex/active/");
     }
 }

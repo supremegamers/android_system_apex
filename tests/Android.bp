@@ -20,7 +20,7 @@ java_defaults {
     name: "apex_e2e_test_defaults",
     libs: [
         "tradefed",
-        "truth-prebuilt",
+        "truth",
     ],
     static_libs: [
         "apex_e2e_base_test",
@@ -29,7 +29,7 @@ java_defaults {
 
 java_test_host {
     name: "timezone_data_e2e_tests",
-    srcs:  ["src/**/TimezoneDataHostTest.java"],
+    srcs: ["src/**/TimezoneDataHostTest.java"],
     defaults: ["apex_e2e_test_defaults"],
     static_libs: [
         "platformprotos",
@@ -43,7 +43,7 @@ java_test_host {
 
 java_test_host {
     name: "media_e2e_tests",
-    srcs:  ["src/**/MediaHostTest.java"],
+    srcs: ["src/**/MediaHostTest.java"],
     defaults: ["apex_e2e_test_defaults"],
     data: [
         ":test_com.android.media",
@@ -54,7 +54,7 @@ java_test_host {
 
 java_test_host {
     name: "media_swcodec_e2e_tests",
-    srcs:  ["src/**/MediaSwCodecHostTest.java"],
+    srcs: ["src/**/MediaSwCodecHostTest.java"],
     defaults: ["apex_e2e_test_defaults"],
     data: [
         ":test_com.android.media.swcodec",
@@ -66,7 +66,7 @@ java_test_host {
 java_test_host {
     name: "apex_targetprep_tests",
     libs: ["tradefed"],
-    srcs:  ["src/**/ApexTargetPrepTest.java"],
+    srcs: ["src/**/ApexTargetPrepTest.java"],
     data: [":StagedInstallTestApexV2"],
     test_config: "apex-targetprep-tests.xml",
     test_suites: ["general-tests"],
@@ -129,9 +129,15 @@ prebuilt_etc {
 
 java_test_host {
     name: "apex_rollback_tests",
-    srcs:  ["src/**/ApexRollbackTests.java"],
-    libs: ["tradefed", "truth-prebuilt"],
-    static_libs: ["frameworks-base-hostutils", "cts-install-lib-host"],
+    srcs: ["src/**/ApexRollbackTests.java"],
+    libs: [
+        "tradefed",
+        "truth",
+    ],
+    static_libs: [
+        "frameworks-base-hostutils",
+        "cts-install-lib-host",
+    ],
     test_config: "apex-rollback-tests.xml",
     test_suites: ["general-tests"],
 
@@ -146,16 +152,16 @@ java_test_host {
 
 java_test_host {
     name: "apexd_host_tests",
-    srcs:  [
+    srcs: [
         "src/**/ApexdHostTest.java",
         ":apex-info-list",
     ],
     libs: ["tradefed"],
     static_libs: [
-        "truth-prebuilt",
+        "truth",
         "apex_manifest_proto_java",
         "frameworks-base-hostutils",
-        "cts-install-lib-host"
+        "cts-install-lib-host",
     ],
     test_config: "apexd-host-tests.xml",
     test_suites: ["general-tests"],
@@ -167,6 +173,10 @@ java_test_host {
         ":com.android.apex.cts.shim.v2_prebuilt",
         ":com.android.apex.cts.shim.v2_no_pb",
         ":com.android.apex.cts.shim.v2_additional_file_prebuilt",
+        ":test.good1.com.android.hardware.wifi",
+        ":test.bad1.com.android.hardware.wifi",
+        ":test.bad2.com.android.hardware.wifi",
+        ":test.bad3.com.android.hardware.wifi",
     ],
 }
 
@@ -179,7 +189,7 @@ java_test_host {
     libs: [
         "compatibility-tradefed",
         "tradefed",
-        "truth-prebuilt",
+        "truth",
         "hamcrest",
         "hamcrest-library",
     ],
@@ -193,7 +203,8 @@ java_test_host {
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo.apex.all.ready",
-        ":com.android.apex.vendor.foo.v1_with_service"
+        ":com.android.apex.vendor.foo.bootstrap",
+        ":com.android.apex.vendor.foo.v1_with_service",
     ],
     test_config: "vendor-apex-tests.xml",
     test_suites: [
@@ -203,12 +214,12 @@ java_test_host {
 
 android_test_helper_app {
     name: "VendorApexTestsApp",
-    srcs:  ["app/src/**/VendorApexTests.java"],
-    manifest : "app/VendorApexTests_AndroidManifest.xml",
+    srcs: ["app/src/**/VendorApexTests.java"],
+    manifest: "app/VendorApexTests_AndroidManifest.xml",
     static_libs: [
         "androidx.test.runner",
         "androidx.test.core",
-        "truth-prebuilt",
+        "truth",
         "cts-install-lib",
         "testng",
     ],
@@ -227,7 +238,7 @@ android_test_helper_app {
 java_test_host {
     name: "sharedlibs_host_tests",
     srcs: [
-        "src/**/SharedLibsApexTest.java"
+        "src/**/SharedLibsApexTest.java",
     ],
     libs: ["tradefed"],
     java_resources: [
@@ -250,7 +261,7 @@ java_test_host {
         "compatibility-host-util",
         "cts-install-lib-host",
         "frameworks-base-hostutils",
-        "truth-prebuilt"
+        "truth",
     ],
     test_config: "shared-libs-apex-tests.xml",
     test_suites: ["general-tests"],
@@ -258,9 +269,15 @@ java_test_host {
 
 java_test_host {
     name: "apex_compression_platform_tests",
-    srcs:  ["src/**/ApexCompressionTests.java"],
-    libs: ["tradefed", "truth-prebuilt"],
-    static_libs: ["cts-install-lib-host", "testng"],
+    srcs: ["src/**/ApexCompressionTests.java"],
+    libs: [
+        "tradefed",
+        "truth",
+    ],
+    static_libs: [
+        "cts-install-lib-host",
+        "testng",
+    ],
     test_config: "apex_compression_platform_tests.xml",
     test_suites: ["general-tests"],
     data: [
@@ -277,19 +294,31 @@ android_test_helper_app {
     name: "apex_compression_tests_app",
     manifest: "app/ApexCompressionTests_AndroidManifest.xml",
     srcs: ["app/src/**/ApexCompressionTests.java"],
-    static_libs: ["androidx.test.rules", "cts-install-lib", "cts-rollback-lib", "testng"],
+    static_libs: [
+        "androidx.test.rules",
+        "cts-install-lib",
+        "cts-rollback-lib",
+        "testng",
+    ],
     test_suites: ["general-tests"],
     java_resources: [
         ":com.android.apex.compressed.v1_original",
         ":com.android.apex.compressed.v2_original",
-    ]
+    ],
 }
 
 java_test_host {
     name: "apex_apkinapex_tests",
-    srcs:  ["src/**/ApkInApexTests.java"],
-    libs: ["tradefed", "truth-prebuilt"],
-    static_libs: ["cts-install-lib-host", "frameworks-base-hostutils", "testng"],
+    srcs: ["src/**/ApkInApexTests.java"],
+    libs: [
+        "tradefed",
+        "truth",
+    ],
+    static_libs: [
+        "cts-install-lib-host",
+        "frameworks-base-hostutils",
+        "testng",
+    ],
     test_config: "apk-in-apex-tests.xml",
     test_suites: ["general-tests"],
     data: [
@@ -318,7 +347,7 @@ cc_test_library {
         "-Werror",
     ],
     header_libs: [
-        "jni_headers"
+        "jni_headers",
     ],
     stl: "c++_shared",
     sdk_version: "current",
@@ -329,12 +358,12 @@ java_test_host {
     srcs: ["src/**/MaxSdkTests.java"],
     libs: [
         "tradefed",
-        "truth-prebuilt"
+        "truth",
     ],
     static_libs: [
         "cts-install-lib-host",
         "frameworks-base-hostutils",
-        "testng"
+        "testng",
     ],
     test_config: "max-sdk-tests.xml",
     test_suites: ["general-tests"],
@@ -355,7 +384,12 @@ android_test_helper_app {
         "libApkInApex_jni",
     ],
     compile_multilib: "both",
-    static_libs: ["androidx.test.rules", "cts-install-lib", "cts-rollback-lib", "testng"],
+    static_libs: [
+        "androidx.test.rules",
+        "cts-install-lib",
+        "cts-rollback-lib",
+        "testng",
+    ],
     test_suites: ["general-tests"],
 }
 
@@ -363,7 +397,12 @@ android_test_helper_app {
     name: "apex_maxsdk_tests_app",
     manifest: "app/MaxSdkTests_AndroidManifest.xml",
     srcs: ["app/src/**/MaxSdkTests.java"],
-    static_libs: ["androidx.test.rules", "cts-install-lib", "cts-rollback-lib", "testng"],
+    static_libs: [
+        "androidx.test.rules",
+        "cts-install-lib",
+        "cts-rollback-lib",
+        "testng",
+    ],
     test_suites: ["general-tests"],
 }
 

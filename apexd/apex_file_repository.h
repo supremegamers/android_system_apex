@@ -214,8 +214,5 @@ class ApexFileRepository final {
   std::unordered_map<std::string, BlockApexOverride> block_apex_overrides_;
 };
 
-std::string GetApexSelectFilenameFromProp(
-    const std::vector<std::string>& prefixes, const std::string& apex_name);
-
 }  // namespace apex
 }  // namespace android

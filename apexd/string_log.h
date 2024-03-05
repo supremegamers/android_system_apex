@@ -56,20 +56,4 @@ class BaseStringLog {
 
 class StringLog : public BaseStringLog<StringLog> {};
 
-class PStringLog : public BaseStringLog<PStringLog> {
- public:
-  PStringLog() : errno_(errno) {}
-
-  // Get the current string.
-  // NOLINTNEXTLINE(google-explicit-constructor)
-  operator std::string() const {
-    return (BaseStringLog::operator std::string())
-        .append(": ")
-        .append(strerror(errno_));
-  }
-
- private:
-  int errno_;
-};
-
 #endif  // ANDROID_APEXD_STRING_LOG_H_

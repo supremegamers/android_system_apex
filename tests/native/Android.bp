@@ -34,12 +34,12 @@ cc_test {
     },
 
     shared_libs: [
-        "libbase",
         "liblog",
         "libdl_android",
     ],
 
     static_libs: [
+        "libbase",
         "libc++fs",
         "libfs_mgr",
     ],

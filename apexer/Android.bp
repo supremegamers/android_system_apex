@@ -20,6 +20,7 @@ apexer_tools = [
       "apexer",
       "aapt2",
       "avbtool",
+      "conv_apex_manifest",
       "e2fsdroid",
       "mke2fs",
       "resize2fs",
@@ -95,26 +96,6 @@ python_binary_host {
     ],
 }
 
-apex_key {
-  name: "com.android.support.apexer.key",
-  public_key: "etc/com.android.support.apexer.avbpubkey",
-  private_key: "etc/com.android.support.apexer.pem",
-}
-
-// This is a host-apex that contains all the binaries needed to create new apex's seprate from
-// soong.
-apex_test {
-  name: "com.android.support.apexer",
-  payload_type: "zip",
-  host_supported: true,
-  device_supported: false,
-  manifest: "etc/manifest.json",
-  ignore_system_library_special_case: true,
-  key: "com.android.support.apexer.key",
-  binaries: apexer_tools + apexer_go_tools,
-  updatable: false,
-}
-
 // TODO(b/148659029): this test can't run in TEST_MAPPING.
 python_test_host {
     name: "apexer_test",
@@ -132,6 +113,7 @@ python_test_host {
         "testdata/com.android.example.apex.pem",
         "testdata/com.android.example.apex.pk8",
         "testdata/com.android.example.apex.x509.pem",
+        "testdata/manifest.json",
     ],
     test_suites: ["general-tests"],
     libs: [
@@ -152,6 +134,9 @@ genrule_defaults {
     name: "apexer_test_host_tools_list",
     tools: apexer_deps_tools + [
         "signapk",
+    ],
+    srcs: [
+        ":current_android_jar",
     ],
 }
 
@@ -179,6 +164,7 @@ genrule {
         "mkdir -p $$LIB && " +
         "cp $(in) $$BIN && " +
         "cp $(location apexer) $$BIN && " +
+        "cp $(location conv_apex_manifest) $$BIN && " +
         "cp $(location deapexer) $$BIN && " +
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +

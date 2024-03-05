@@ -24,8 +24,22 @@
 
 #include "apexd.h"
 
+static const android::apex::ApexdConfig kMicrodroidConfig = {
+    android::apex::kApexStatusSysprop,
+    {android::apex::kApexPackageSystemDir},
+    // A bunch of things are not used in Microdroid, hence we use nullptr
+    // instead of an actual value.
+    nullptr, /* active_apex_data_dir */
+    nullptr, /* decompression_dir */
+    nullptr, /* ota_reserved_dir */
+    nullptr, /* apex_hashtree_dir */
+    nullptr, /* staged_session_dir */
+    android::apex::kVmPayloadMetadataPartitionProp,
+    nullptr, /* active_apex_selinux_ctx */
+};
+
 int main(int /*argc*/, char** argv) {
-  android::base::InitLogging(argv, &android::base::KernelLogger);
+  android::base::InitLogging(argv);
   android::base::SetMinimumLogSeverity(android::base::INFO);
 
   // set umask to 022 so that files/dirs created are accessible to other
@@ -33,6 +47,6 @@ int main(int /*argc*/, char** argv) {
   // processes
   umask(022);
 
-  android::apex::SetConfig(android::apex::kDefaultConfig);
+  android::apex::SetConfig(kMicrodroidConfig);
   return android::apex::OnStartInVmMode();
 }

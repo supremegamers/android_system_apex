@@ -41,10 +41,10 @@ class VoldCheckpointInterface : public CheckpointInterface {
 
   android::base::Result<bool> NeedsCheckpoint() override;
   android::base::Result<bool> NeedsRollback() override;
-  android::base::Result<void> StartCheckpoint(int32_t retry) override;
+  android::base::Result<void> StartCheckpoint(int32_t num_retries) override;
 
   android::base::Result<void> AbortChanges(const std::string& msg,
-                                           bool num_retries) override;
+                                           bool retry) override;
 
   static android::base::Result<VoldCheckpointInterface> Create();
 

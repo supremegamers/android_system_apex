@@ -43,6 +43,14 @@ cc_library_static {
     ],
 }
 
+rust_protobuf {
+    name: "libapex_manifest_rs",
+    protos: ["apex_manifest.proto"],
+    crate_name: "apex_manifest",
+    source_stem: "apex_manifest",
+    use_protobuf3: true,
+}
+
 python_library_host {
     name: "apex_manifest_proto",
     srcs: [

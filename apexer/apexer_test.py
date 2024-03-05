@@ -17,6 +17,7 @@
 """Unit tests for apexer."""
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -40,6 +41,7 @@ TEST_PRIVATE_KEY = os.path.join("testdata", "com.android.example.apex.pem")
 TEST_X509_KEY = os.path.join("testdata", "com.android.example.apex.x509.pem")
 TEST_PK8_KEY = os.path.join("testdata", "com.android.example.apex.pk8")
 TEST_AVB_PUBLIC_KEY = os.path.join("testdata", "com.android.example.apex.avbpubkey")
+TEST_MANIFEST_JSON = os.path.join("testdata", "manifest.json")
 
 def run(args, verbose=None, **kwargs):
     """Creates and returns a subprocess.Popen object.
@@ -184,7 +186,7 @@ class ApexerRebuildTest(unittest.TestCase):
         files = {}
         for i in ["apexer", "deapexer", "avbtool", "mke2fs", "sefcontext_compile", "e2fsdroid",
             "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
-                  "signapk.jar", "android.jar", "blkid", "fsck.erofs"]:
+                  "signapk.jar", "android.jar", "blkid", "fsck.erofs", "conv_apex_manifest"]:
             file_path = os.path.join(dir_name, "bin", i)
             if os.path.exists(file_path):
                 os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR);
@@ -428,6 +430,43 @@ class ApexerRebuildTest(unittest.TestCase):
 
     def test_apex_with_overridden_package_name(self):
       self._run_build_test(TEST_APEX_WITH_OVERRIDDEN_PACKAGE_NAME)
+
+    def test_conv_apex_manifest(self):
+        # .pb generation from json
+        manifest_json_path = os.path.join(get_current_dir(), TEST_MANIFEST_JSON)
+
+        fd, fn = tempfile.mkstemp(prefix=self._testMethodName + "_manifest_", suffix=".pb")
+        os.close(fd)
+        self._to_cleanup.append(fn)
+        cmd = [
+            "conv_apex_manifest",
+            "proto",
+            manifest_json_path,
+            "-o", fn]
+        run_and_check_output(cmd)
+
+        with open(manifest_json_path) as fd_json:
+            manifest_json = json.load(fd_json)
+        manifest_apex = ParseApexManifest(fn)
+        ValidateApexManifest(manifest_apex)
+
+        self.assertEqual(manifest_apex.name, manifest_json["name"])
+        self.assertEqual(manifest_apex.version, manifest_json["version"])
+
+        # setprop check on already generated .pb
+        next_version = 20
+        cmd = [
+            "conv_apex_manifest",
+            "setprop",
+            "version", str(next_version),
+            fn]
+        run_and_check_output(cmd)
+
+        manifest_apex = ParseApexManifest(fn)
+        ValidateApexManifest(manifest_apex)
+
+        self.assertEqual(manifest_apex.version, next_version)
+
 
 
 if __name__ == '__main__':
